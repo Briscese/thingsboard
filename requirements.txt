@@ -1,8 +1,0 @@
-ResponsiveAnalogRead
-BLE
-HTTPClient
-ArduinoJson
-NTPClient
-WiFi
-Preferences
-HTTPUpdate
