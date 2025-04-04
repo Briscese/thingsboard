@@ -36,3 +36,6 @@ O sistema irá automaticamente:
 2. Iniciar o scanner BLE
 3. Coletar dados de dispositivos próximos
 4. Enviar os dados para o servidor configurado
+
+Manual: 
+[Manual de configuração dispositivos BLE v1.0.pdf](https://github.com/user-attachments/files/19609825/Manual.de.configuracao.dispositivos.BLE.v1.0.pdf)
