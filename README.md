@@ -11,17 +11,6 @@ Este projeto implementa um sistema de localização usando ESP32 e BLE para rast
 - Enviar dados para um servidor via HTTP
 - Suportar diferentes tipos de dispositivos (smartphones, tags, etc.)
 
-## Estrutura do Projeto
-
-```
-.
-├── src/               # Código fonte principal
-├── lib/               # Bibliotecas externas
-├── include/           # Arquivos de cabeçalho
-├── platformio.ini     # Configuração do PlatformIO
-└── requirements.txt   # Dependências Python (se necessário)
-```
-
 ## Requisitos
 
 - PlatformIO
@@ -37,7 +26,6 @@ Este projeto implementa um sistema de localização usando ESP32 e BLE para rast
 ## Configuração
 
 1. Clone o repositório
-2. Abra o projeto no PlatformIO
 3. Configure as credenciais WiFi no arquivo `src/NetworkManager.cpp`
 4. Compile e faça upload para o ESP32
 
@@ -48,7 +36,3 @@ O sistema irá automaticamente:
 2. Iniciar o scanner BLE
 3. Coletar dados de dispositivos próximos
 4. Enviar os dados para o servidor configurado
-
-## Licença
-
-Este projeto está sob a licença [].
