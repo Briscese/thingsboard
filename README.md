@@ -37,5 +37,5 @@ O sistema irá automaticamente:
 3. Coletar dados de dispositivos próximos
 4. Enviar os dados para o servidor configurado
 
-Manual de configuração do usuário: 
+## Manual de configuração do usuário: 
 [Manual de configuração dispositivos BLE v1.0.pdf](https://github.com/user-attachments/files/19609825/Manual.de.configuracao.dispositivos.BLE.v1.0.pdf)
