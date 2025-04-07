@@ -795,9 +795,7 @@ void DeviceCallbacks()
     
     String macAddressDevice = device.substring(device.indexOf("Address: ")+9,device.indexOf("Address: ")+26);
     macAddressDevice.toUpperCase();
-    
-    if(macAddressDevice == "AC:23:3F:AC:B6:7B")
-        GetMinewDevice(advertisedDevice);
+    GetMinewDevice(advertisedDevice);
   }
     
   pBLEScan->clearResults();
