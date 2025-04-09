@@ -486,7 +486,7 @@ void registraDadosDoUsuario(String macAddress, String code, int rssiBLE, int dev
   }
 }
 
-double distance(double sinalPower)
+double CalculateDistance(double sinalPower)
 {
   if (sinalPower == 0) 
     return 0.0;
@@ -545,7 +545,7 @@ double distance(double sinalPower)
   return distance;
 }
 
-void getIBeacon(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length)
+void GetIBeacon(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length)
 {
   if(advertisedDevice.haveManufacturerData()){
     std::string manufacturerData = advertisedDevice.getManufacturerData();
@@ -578,7 +578,7 @@ void getIBeacon(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t l
   }
 }
 
-void getTelemetry(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length)
+void GetTelemetry(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length)
 {
   if(advertisedDevice.haveServiceData()){
     std::string serviceData = advertisedDevice.getServiceData();
@@ -628,7 +628,7 @@ void getTelemetry(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t
   }  
 }
 
-void getAccelerometer(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length)
+void GetAccelerometer(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length)
 {
   String device = advertisedDevice.toString().c_str();
 
@@ -681,20 +681,6 @@ void getAccelerometer(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, si
   
 }
 
-int getAdvertisingDataBatteryV3(uint8_t payload)
-{
-  char valorHex[3]; // Para armazenar o valor hexadecimal como string
-  
-  // Convertendo uint8_t para hexadecimal
-  snprintf(valorHex, sizeof(valorHex), "%02X", payload);
-
-  // Convertendo a string hexadecimal de volta para um inteiro
-  int valorInteiro;
-  sscanf(valorHex, "%X", &valorInteiro);
-  
-  return valorInteiro;
-}
-
 void ListDevices()
 {
   BLEAdvertisedDevice advertisedDevice;
@@ -719,11 +705,10 @@ void ListDevices()
 
     payload = advertisedDevice.getPayload();
     length = advertisedDevice.getPayloadLength();
-    serviceData = advertisedDevice.getServiceData();
 
-    getIBeacon(advertisedDevice, payload, length);
-    getTelemetry(advertisedDevice, payload, length);
-    getAccelerometer(advertisedDevice, payload, length);
+    GetIBeacon(advertisedDevice, payload, length);
+    GetTelemetry(advertisedDevice, payload, length);
+    GetAccelerometer(advertisedDevice, payload, length);
   }
     
   pBLEScan->clearResults();
