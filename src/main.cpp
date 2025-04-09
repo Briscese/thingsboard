@@ -24,6 +24,7 @@
 #include <iostream>
 #include <cmath>
 #include <map>
+#include "models/User.h"
 
 extern void GetIBeacon(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length);
 extern void GetTelemetry(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length);
@@ -46,7 +47,6 @@ int MAX_ERROR_MODE = 1800000;
 String placa = "FAB_SJC_CE1_T_0007";
 
 String apiUrl = "http://brd-parque-it.pointservice.com.br/api/v1/IOT";
-//String apiUrl = "https://localhost:44331/api/v1/IOT";
 
 String versionId = "11.0.0.0v-point-pqtech-beta0015082024.bin";
 
@@ -81,24 +81,7 @@ struct readsvertor {
 };
 
 std::vector<readsvertor> allreads;
-
-struct user {
-  String id;
-  std::vector<int> mediasRssi;
-  bool loggedIn;
-  int batteryLevel = 0;
-  float x = 0;
-  float y = 0;
-  float z = 0;
-  int vezes = 0;
-  String tempo;
-  String mac;
-  int deviceTypeUser;
-  float timeActivity;
-  ResponsiveAnalogRead analog = ResponsiveAnalogRead(0, true, 0.8);
-};
-
-std::vector<user> allUsers;
+std::vector<User> allUsers;
 
 struct CompanyIdentifier {
     uint16_t code;
@@ -180,15 +163,13 @@ std::vector<std::string> separatestring(std::string str, int n)
 int findUser(String id) {
   int i = 0;
   while (i < allUsers.size()) {
-    if (allUsers[i].id == id) {
+    if (allUsers[i].getId() == id) {
       return i;
     }
     i++;
   }
   return -1;
 }
-
-
 
 void activeSoftAP() {
   if (errorMode) {
@@ -393,19 +374,18 @@ void registraDadosDoUsuario(String macAddress, String code, int rssiBLE, int dev
   if (allUsers.size() == 0) 
   {
     inicioMedia = millis();
-    user firstUser;
-    firstUser.id = code;
-    firstUser.batteryLevel = batterylevel;
-    firstUser.x = x;
-    firstUser.y = y;
-    firstUser.z = z;
-    firstUser.analog = ResponsiveAnalogRead(0, true, 0.8);
-    firstUser.analog.update((rssiBLE * -1));
-    firstUser.mediasRssi.push_back(firstUser.analog.getValue());
-    firstUser.tempo = formattedDate;
-    firstUser.mac = macAddress;
-    firstUser.timeActivity = timeActivity;
-    firstUser.deviceTypeUser = deviceType;
+    User firstUser;
+    firstUser.setId(code);
+    firstUser.setBatteryLevel(batterylevel);
+    firstUser.setX(x);
+    firstUser.setY(y);
+    firstUser.setZ(z);
+    firstUser.updateAnalog((rssiBLE * -1));
+    firstUser.addMediaRssi(firstUser.getAnalog().getValue());
+    firstUser.setTempo(formattedDate);
+    firstUser.setMac(macAddress);
+    firstUser.setTimeActivity(timeActivity);
+    firstUser.setDeviceTypeUser(deviceType);
     allUsers.push_back(firstUser);
   }
   else 
@@ -413,36 +393,33 @@ void registraDadosDoUsuario(String macAddress, String code, int rssiBLE, int dev
     int foundUser = 0;
     foundUser = findUser(code);
     if (foundUser != -1) {
-      if(allUsers[foundUser].batteryLevel == 0 && batterylevel > 0)
+      if(allUsers[foundUser].getBatteryLevel() == 0 && batterylevel > 0)
       {
-        allUsers[foundUser].batteryLevel = batterylevel;
+        allUsers[foundUser].setBatteryLevel(batterylevel);
       }
-      allUsers[foundUser].x = x;
-      allUsers[foundUser].y = y;
-      allUsers[foundUser].z = z;
+      allUsers[foundUser].setX(x);
+      allUsers[foundUser].setY(y);
+      allUsers[foundUser].setZ(z);
 
-      allUsers[foundUser].analog.update((rssiBLE * -1));
-      allUsers[foundUser].mediasRssi.push_back(allUsers[foundUser].analog.getValue());
-      allUsers[foundUser].tempo = formattedDate;
-      allUsers[foundUser].timeActivity = timeActivity;
+      allUsers[foundUser].updateAnalog((rssiBLE * -1));
+      allUsers[foundUser].addMediaRssi(allUsers[foundUser].getAnalog().getValue());
+      allUsers[foundUser].setTempo(formattedDate);
+      allUsers[foundUser].setTimeActivity(timeActivity);
     }
     else 
     {
-      user newUser;
-      newUser.id = code;
-
-      newUser.batteryLevel = batterylevel;
-      newUser.x = x;
-      newUser.y = y;
-      newUser.z = z;
-
-      newUser.analog = ResponsiveAnalogRead(0, true, 0.8);
-      newUser.analog.update((rssiBLE * -1));
-      newUser.mediasRssi.push_back(newUser.analog.getValue());
-      newUser.tempo = formattedDate;
-      newUser.mac = macAddress;
-      newUser.deviceTypeUser = deviceType;
-      newUser.timeActivity = timeActivity;
+      User newUser;
+      newUser.setId(code);
+      newUser.setBatteryLevel(batterylevel);
+      newUser.setX(x);
+      newUser.setY(y);
+      newUser.setZ(z);
+      newUser.updateAnalog((rssiBLE * -1));
+      newUser.addMediaRssi(newUser.getAnalog().getValue());
+      newUser.setTempo(formattedDate);
+      newUser.setMac(macAddress);
+      newUser.setDeviceTypeUser(deviceType);
+      newUser.setTimeActivity(timeActivity);
       allUsers.push_back(newUser);
     }
   }
@@ -506,8 +483,6 @@ double CalculateDistance(double sinalPower)
   Serial.printf("distance: %f\n", distance);
   return distance;
 }
-
-
 
 void ListDevices()
 {
@@ -575,15 +550,15 @@ void IRAM_ATTR resetModule() {
 }
 
 void loggedIn(int pos) {
-  if (allUsers[pos].mediasRssi.size() >= 3) {
-    allUsers[pos].loggedIn = true;
+  if (allUsers[pos].getMediasRssi().size() >= 3) {
+    allUsers[pos].setLoggedIn(true);
     Serial.print("Device loggedIn: ");
-    Serial.println(allUsers[pos].mediasRssi.size());
+    Serial.println(allUsers[pos].getMediasRssi().size());
   }
   else {
     Serial.println("Device NOT loggedIn: Minimum (3)");
-    allUsers[pos].loggedIn = false;
-    allUsers[pos].vezes = 0;
+    allUsers[pos].setLoggedIn(false);
+    allUsers[pos].setVezes(0);
   }
 }
 
@@ -988,20 +963,23 @@ void LoopingsDeDados()
       Serial.println();
       Serial.println("-----------------------User postIn---------------------------");
       Serial.print(F("Device: "));
-      Serial.println(allUsers[i].id);
+      Serial.println(allUsers[i].getId());
       Serial.print("Sending...(");
       Serial.print(i+1);
       Serial.println(")");
 
       loggedIn(i);
-      if (allUsers[i].loggedIn)
+      if (allUsers[i].isLoggedIn())
       {
-          int mode = CalculateMode(allUsers[i].mediasRssi);
+          int mode = CalculateMode(allUsers[i].getMediasRssi());
           CalculateDistance(mode*-1);
-          allUsers[i].mediasRssi.clear();
-          allUsers[i].vezes++;
+          allUsers[i].clearMediasRssi();
+          allUsers[i].incrementVezes();
           
-          postIn(allUsers[i].id, mode, allUsers[i].tempo, allUsers[i].mac, allUsers[i].deviceTypeUser, allUsers[i].batteryLevel, allUsers[i].x, allUsers[i].y, allUsers[i].z, allUsers[i].timeActivity);
+          postIn(allUsers[i].getId(), mode, allUsers[i].getTempo(), allUsers[i].getMac(), 
+                allUsers[i].getDeviceTypeUser(), allUsers[i].getBatteryLevel(), 
+                allUsers[i].getX(), allUsers[i].getY(), allUsers[i].getZ(), 
+                allUsers[i].getTimeActivity());
           delay(100);
       }
       i++;
@@ -1014,7 +992,6 @@ void LoopingsDeDados()
   }
   else if (millis() - lastScanTime > SCAN_INTERVAL && BLEDevice::getInitialized() == true && sending == false) 
   { 
-    
     Serial.println(); 
     Serial.print("TIME to ACTIVE: ");
     Serial.println(millis() - lastSendTime);
