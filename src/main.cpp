@@ -545,25 +545,104 @@ double distance(double sinalPower)
   return distance;
 }
 
-void GetMinewDevice(BLEAdvertisedDevice advertisedDevice)
+void getIBeacon(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length)
 {
-    uint8_t* payload = advertisedDevice.getPayload();
-    size_t length = advertisedDevice.getPayloadLength();
+  if(advertisedDevice.haveManufacturerData()){
+    std::string manufacturerData = advertisedDevice.getManufacturerData();
+    uint8_t cManufacturerData[100];
+    manufacturerData.copy((char*) cManufacturerData, manufacturerData.length(), 0);
+    if(manufacturerData.length() == 25){
+      Serial.printf("Raw Data: ");
+      for (size_t i = 0; i < length; i++) {
+        Serial.printf("%02X ", payload[i]);   
+      }
+      
+      Serial.println();
+      Serial.printf("Device Found: %s \n", advertisedDevice.toString().c_str());
+      Serial.printf("RSSI: %d \n", advertisedDevice.getRSSI());
+      
+      Serial.printf("Comprimento: %d\n", manufacturerData.length());
+      Serial.printf("\n===============================\n");
+      BLEBeacon oBeacon = BLEBeacon();
+      oBeacon.setData(manufacturerData);
+      Serial.printf("iBeacon Frame\n");
+      Serial.printf("\n===============================\n");
+      Serial.printf("Beacon Information\n");
+      Serial.printf("ID: %04X\n", oBeacon.getManufacturerId());
+      Serial.printf("Major: %d\n", ENDIAN_CHANGE_U16(oBeacon.getMajor()));
+      Serial.printf("Minor: %d\n", ENDIAN_CHANGE_U16(oBeacon.getMinor()));
+      Serial.printf("UUID: %s\n", oBeacon.getProximityUUID().toString().c_str());
+      Serial.printf("Power: %d dBm\n", oBeacon.getSignalPower());
+      Serial.printf("===============================\n\n");
+    }   
+  }
+}
+
+void getTelemetry(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length)
+{
+  if(advertisedDevice.haveServiceData()){
     std::string serviceData = advertisedDevice.getServiceData();
+    uint8_t data [100];
+    serviceData.copy((char*)data, serviceData.length(), 0);
+    if (advertisedDevice.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFEAA))) {
+      Serial.printf("Raw Data: ");
+      for (size_t i = 0; i < length; i++) {
+        Serial.printf("%02X ", payload[i]);   
+      }
+      
+      Serial.println();
+      Serial.printf("Device Found: %s \n", advertisedDevice.toString().c_str());
+      Serial.printf("RSSI: %d \n", advertisedDevice.getRSSI());
+      Serial.printf("\n===============================\n");
+      Serial.printf("Service Data: ");
+      for (size_t i = 0; i < serviceData.length(); i++) {
+          Serial.printf("%02X ", (uint8_t)serviceData[i]);
+      }
+      Serial.printf("===============================\n");
+      Serial.printf("Eddystone Beacon Detectado\n");
+      Serial.printf("UUID: %s\n", advertisedDevice.getServiceDataUUID().toString().c_str());
+      Serial.printf("Comprimento: %d\n", serviceData.length());
+      if (data[0] == 0x10) {
+          Serial.printf("Eddystone Frame Type: Eddystone-URL\n");
+          Serial.printf("===============================\n");
+      } else if (data[0] == 0x20) {
+        uint8_t version = data[1];
+          uint16_t batteryVoltage = (data[2] << 8) | data[3];
+          int16_t temperature = (data[4] << 8) | data[5];
+          uint32_t packetCount = (data[6] << 24) | (data[7] << 16) | (data[8] << 8) | data[9];
+          uint32_t uptime = (data[10] << 24) | (data[11] << 16) | (data[12] << 8) | data[13];
+          Serial.printf("Eddystone Frame Type: Eddystone-TLM\n");
+          Serial.printf("===============================\n");
+          Serial.printf("Versão: %d\n", version);
+          Serial.printf("Voltagem da Bateria: %d V\n", batteryVoltage);
+          Serial.printf("Porcentagem da Bateria %f%%\n", battery_read((float)batteryVoltage / 1000));
+          Serial.printf("Temperatura: %.2f °C\n", temperature / 256.0);
+          Serial.printf("Contador de Pacotes: %u\n", packetCount);
+          Serial.printf("Tempo Ativo: %.1f days\n", (uptime / 10.0) / 86400);
+          Serial.printf("===============================\n");
+      } else if (data[0] == 0x00) {
+          Serial.printf("Eddystone Frame Type: Eddystone-UID\n");
+          Serial.printf("===============================\n");
+      }    
+    }
+  }  
+}
 
-    float batterylevel = 0;
-    float timeActivity = 0;
+void getAccelerometer(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length)
+{
+  String device = advertisedDevice.toString().c_str();
 
-    String device = advertisedDevice.toString().c_str();
+  String macTemp = device.substring(device.indexOf("Address: ")+21, device.indexOf("Address: ")+26);
+  macTemp = macTemp.substring(0,2) + macTemp.substring(3,5);
+  macTemp.toUpperCase();
 
-    String macTemp = device.substring(device.indexOf("Address: ")+21, device.indexOf("Address: ")+26);
-    macTemp = macTemp.substring(0,2) + macTemp.substring(3,5);
-    macTemp.toUpperCase();
+  String macAddressDevice = device.substring(device.indexOf("Address: ")+9,device.indexOf("Address: ")+26);
+  macAddressDevice.toUpperCase();
 
-    String macAddressDevice = device.substring(device.indexOf("Address: ")+9,device.indexOf("Address: ")+26);
-    macAddressDevice.toUpperCase();
+  float batterylevel = 0;
+  float timeActivity = 0;
 
-    if (advertisedDevice.haveServiceData()) {
+  if (advertisedDevice.haveServiceData()) {
       std::string serviceData = advertisedDevice.getServiceData();
       uint8_t data [100];
       serviceData.copy((char*)data, serviceData.length(), 0);
@@ -597,78 +676,9 @@ void GetMinewDevice(BLEAdvertisedDevice advertisedDevice)
           registraDadosDoUsuario(macAddressDevice, macTemp, advertisedDevice.getRSSI(), 4, batterylevel, x, y, z, timeActivity);
           Serial.printf("==========================================================================================================================================\n\n");
       }
-      if (advertisedDevice.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFEAA))) { //Qualquer dispositivo com eddystone
-        Serial.printf("Raw Data: ");
-        for (size_t i = 0; i < length; i++) {
-          Serial.printf("%02X ", payload[i]);   
-        }
-        
-        Serial.println();
-        Serial.printf("Device Found: %s \n", advertisedDevice.toString().c_str());
-        Serial.printf("RSSI: %d \n", advertisedDevice.getRSSI());
-        Serial.printf("\n===============================\n");
-        Serial.printf("Service Data: ");
-        for (size_t i = 0; i < serviceData.length(); i++) {
-            Serial.printf("%02X ", (uint8_t)serviceData[i]);
-        }
-        Serial.printf("===============================\n");
-        Serial.printf("Eddystone Beacon Detectado\n");
-        Serial.printf("UUID: %s\n", advertisedDevice.getServiceDataUUID().toString().c_str());
-        Serial.printf("Comprimento: %d\n", serviceData.length());
-        if (data[0] == 0x10) {
-            Serial.printf("Eddystone Frame Type: Eddystone-URL\n");
-            Serial.printf("===============================\n");
-        } else if (data[0] == 0x20) {
-          uint8_t version = data[1];
-            uint16_t batteryVoltage = (data[2] << 8) | data[3];
-            int16_t temperature = (data[4] << 8) | data[5];
-            uint32_t packetCount = (data[6] << 24) | (data[7] << 16) | (data[8] << 8) | data[9];
-            uint32_t uptime = (data[10] << 24) | (data[11] << 16) | (data[12] << 8) | data[13];
-            Serial.printf("Eddystone Frame Type: Eddystone-TLM\n");
-            Serial.printf("===============================\n");
-            Serial.printf("Versão: %d\n", version);
-            Serial.printf("Voltagem da Bateria: %d V\n", batteryVoltage);
-            Serial.printf("Porcentagem da Bateria %f%%\n", battery_read((float)batteryVoltage / 1000));
-            Serial.printf("Temperatura: %.2f °C\n", temperature / 256.0);
-            Serial.printf("Contador de Pacotes: %u\n", packetCount);
-            Serial.printf("Tempo Ativo: %.1f days\n", (uptime / 10.0) / 86400);
-            timeActivity = (uptime / 10.0) / 86400;
-            Serial.printf("===============================\n");
-        } else if (data[0] == 0x00) {
-            Serial.printf("Eddystone Frame Type: Eddystone-UID\n");
-            Serial.printf("===============================\n");
-        }    
-      }  
+      
     }
-    /*if(advertisedDevice.haveManufacturerData()){
-          std::string manufacturerData = advertisedDevice.getManufacturerData();
-          uint8_t cManufacturerData[100];
-          manufacturerData.copy((char*) cManufacturerData, manufacturerData.length(), 0);
-          if(manufacturerData.length() == 25){
-            Serial.printf("Raw Data: ");
-          for (size_t i = 0; i < length; i++) {
-            Serial.printf("%02X ", payload[i]);   
-          }
-          
-          Serial.println();
-          Serial.printf("Device Found: %s \n", advertisedDevice.toString().c_str());
-          Serial.printf("RSSI: %d \n", advertisedDevice.getRSSI());
-          
-          Serial.printf("Comprimento: %d\n", manufacturerData.length());
-          Serial.printf("\n===============================\n");
-          BLEBeacon oBeacon = BLEBeacon();
-          oBeacon.setData(manufacturerData);
-          Serial.printf("iBeacon Frame\n");
-          Serial.printf("\n===============================\n");
-          Serial.printf("Beacon Information\n");
-          Serial.printf("ID: %04X\n", oBeacon.getManufacturerId());
-          Serial.printf("Major: %d\n", ENDIAN_CHANGE_U16(oBeacon.getMajor()));
-          Serial.printf("Minor: %d\n", ENDIAN_CHANGE_U16(oBeacon.getMinor()));
-          Serial.printf("UUID: %s\n", oBeacon.getProximityUUID().toString().c_str());
-          Serial.printf("Power: %d dBm\n", oBeacon.getSignalPower());
-          Serial.printf("===============================\n\n");
-        }   
-    }*/
+  
 }
 
 void GetSmartPhoneAndroidInfo(std::vector<std::string> splittedStrings, BLEAdvertisedDevice advertisedDevice)
@@ -779,23 +789,35 @@ int getAdvertisingDataBatteryV3(uint8_t payload)
   return valorInteiro;
 }
 
-void DeviceCallbacks()
+void ListDevices()
 {
+  BLEAdvertisedDevice advertisedDevice;
+  String device;
+  String macAddressDevice;
+  uint8_t* payload = nullptr;
+  size_t length = 0;
+  std::string serviceData;
+
   foundDevices = pBLEScan->start(3);
-  //delay(3000);
   int deviceCount = foundDevices.getCount();
-  Serial.print("Scan realizado: Founded Devices:");
-  Serial.println(deviceCount);
-  lastScanTime = millis(); 
   
+  Serial.printf("Founded Devices: %d\n", deviceCount);
+  lastScanTime = millis(); 
+
   for (uint32_t i = 0; i < deviceCount; i++)
   {
-    BLEAdvertisedDevice advertisedDevice = foundDevices.getDevice(i);
-    String device = advertisedDevice.toString().c_str();
-    
-    String macAddressDevice = device.substring(device.indexOf("Address: ")+9,device.indexOf("Address: ")+26);
+    advertisedDevice = foundDevices.getDevice(i);
+    device = advertisedDevice.toString().c_str();
+    macAddressDevice = device.substring(device.indexOf("Address: ")+9,device.indexOf("Address: ")+26);
     macAddressDevice.toUpperCase();
-    GetMinewDevice(advertisedDevice);
+
+    payload = advertisedDevice.getPayload();
+    length = advertisedDevice.getPayloadLength();
+    serviceData = advertisedDevice.getServiceData();
+
+    getIBeacon(advertisedDevice, payload, length);
+    getTelemetry(advertisedDevice, payload, length);
+    getAccelerometer(advertisedDevice, payload, length);
   }
     
   pBLEScan->clearResults();
@@ -1283,7 +1305,7 @@ void LoopingsDeDados()
     Serial.print(".");
     Serial.print(".");
     Serial.println("."); 
-    DeviceCallbacks();
+    ListDevices();
   }
   else
   {
