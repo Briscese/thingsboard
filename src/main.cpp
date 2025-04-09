@@ -714,7 +714,7 @@ void ListDevices()
   pBLEScan->clearResults();
 }
 
-double calculateDistance(const std::vector<int>& numbers) {
+int CalculateMode(const std::vector<int>& numbers) {
     
     int more_repeat = 0;
     int repeat = 0;
@@ -1168,8 +1168,8 @@ void LoopingsDeDados()
       loggedIn(i);
       if (allUsers[i].loggedIn)
       {
-          int mode = calculateDistance(allUsers[i].mediasRssi);
-          distance(mode*-1);
+          int mode = CalculateMode(allUsers[i].mediasRssi);
+          CalculateDistance(mode*-1);
           allUsers[i].mediasRssi.clear();
           allUsers[i].vezes++;
           
