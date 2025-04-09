@@ -186,41 +186,53 @@ int findUser(String id) {
   return -1;
 }
 
-float battery_read(float batteryVoltage)
+float GetBattery(float batteryVoltage)
 {
     float percentage = 0;
+    int range = 0;
 
-    if(batteryVoltage > 3.0){
-      percentage = 100;
-    }else if(batteryVoltage > 2.9 && batteryVoltage <= 3.0){
-      percentage = 100 - (3.0 - batteryVoltage) * 58/0.1;
-    }else if(batteryVoltage > 2.74 && batteryVoltage <= 2.9){
-      percentage = 42 - (2.9 - batteryVoltage) * 24/0.16;
-    }else if(batteryVoltage > 2.44 && batteryVoltage <= 2.74){
-      percentage = 18 - (2.74 - batteryVoltage) * 12/0.3;
-    }else if(batteryVoltage > 2.1 && batteryVoltage <= 2.44){
-      percentage = 6 - (2.44 - batteryVoltage) * 6/0.34;
-    }else if(batteryVoltage < 2.1){
-      percentage = 0; 
+    if (batteryVoltage > 3.0f) range = 5;
+    else if (batteryVoltage > 2.9f) range = 4;
+    else if (batteryVoltage > 2.74f) range = 3;
+    else if (batteryVoltage > 2.44f) range = 2;
+    else if (batteryVoltage > 2.1f) range = 1;
+    else range = 0;
+
+    switch (range)
+    {
+        case 5:
+            percentage = 100;
+            break;
+        case 4:
+            percentage = 100 - (3.0f - batteryVoltage) * (58.0f / 0.1f);
+            break;
+        case 3:
+            percentage = 42 - (2.9f - batteryVoltage) * (24.0f / 0.16f);
+            break;
+        case 2:
+            percentage = 18 - (2.74f - batteryVoltage) * (12.0f / 0.3f);
+            break;
+        case 1:
+            percentage = 6 - (2.44f - batteryVoltage) * (6.0f / 0.34f);
+            break;
+        case 0:
+            percentage = 0;
+            break;
     }
+
     return std::ceil(percentage);
 }
 
-float getAdvertisingDataAcelerometerV3(uint8_t msb, uint8_t lsb) {
-    // Constrói o valor de 16 bits a partir dos dois bytes
+float GetAccelerometer(uint8_t msb, uint8_t lsb) {
     uint16_t rawData = (msb << 8) | lsb;
 
-    // Extrai a parte inteira e fracionária
     int integerPart = (rawData >> 8) & 0xFF;
     int fractionalPart = rawData & 0xFF;
 
-    // Converte a parte fracionária para o formato decimal
     float fractionalValue = fractionalPart / 256.0;
 
-    // Soma a parte inteira com a parte fracionária
     float result = integerPart + fractionalValue;
 
-    // Tratamento para valores negativos
     if (rawData & 0x8000) {
         result -= 256.0;
     }
@@ -615,7 +627,7 @@ void GetTelemetry(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t
           Serial.printf("===============================\n");
           Serial.printf("Versão: %d\n", version);
           Serial.printf("Voltagem da Bateria: %d V\n", batteryVoltage);
-          Serial.printf("Porcentagem da Bateria %f%%\n", battery_read((float)batteryVoltage / 1000));
+          Serial.printf("Porcentagem da Bateria %f%%\n", GetBattery((float)batteryVoltage / 1000));
           Serial.printf("Temperatura: %.2f °C\n", temperature / 256.0);
           Serial.printf("Contador de Pacotes: %u\n", packetCount);
           Serial.printf("Tempo Ativo: %.1f days\n", (uptime / 10.0) / 86400);
@@ -661,9 +673,9 @@ void GetAccelerometer(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, si
           }
           uint8_t version = data[1];
           uint16_t batteryLevel = data[2];
-          float x =  getAdvertisingDataAcelerometerV3(data[3], data[4]);
-          float y =  getAdvertisingDataAcelerometerV3(data[5], data[6]);
-          float z =  getAdvertisingDataAcelerometerV3(data[7], data[8]);
+          float x =  GetAccelerometer(data[3], data[4]);
+          float y =  GetAccelerometer(data[5], data[6]);
+          float z =  GetAccelerometer(data[7], data[8]);
           
           Serial.printf("\nDispositivo Minew Encontrado\n");
           Serial.printf("Frame Type: Minew\n");
