@@ -28,12 +28,14 @@
 #include "headers/Distributor.h"
 #include "headers/Advertisements.h"
 
+#define COLOR_RESET   "\033[0m"
+#define COLOR_IBEACON "\033[38;5;214m"
+#define COLOR_TELEMETRY "\033[38;5;45m"
+#define COLOR_ACCELEROMETER "\033[38;5;84m"
+
 WiFiServer server(80);
 HTTPClient http;
 Preferences preferences;
-
-BLEScan* pBLEScan; //Variável que irá guardar o scan
-BLEScanResults foundDevices;
 
 #define main_h
 #define SCAN_INTERVAL 3000
@@ -41,7 +43,8 @@ int MAX_ERROR_MODE = 1800000;
 #define TARGET_RSSI -90 //RSSI limite para ligar o relê.
 #define MAX_MISSING_TIME 7000 //Tempo para desligar o relê desde o momento que o iTag não for encontrado
 
-
+BLEScan* pBLEScan;
+BLEScanResults foundDevices;
 String placa = "FAB_SJC_CE1_T_0007";
 
 String apiUrl = "http://brd-parque-it.pointservice.com.br/api/v1/IOT";
@@ -65,7 +68,7 @@ bool anterior = false;
 int tentativas = 0;
 int media = 0;
 int comunicationErrors = 0;
-uint32_t lastScanTime = 0; //Quando ocorreu o último scan
+; //Quando ocorreu o último scan
 
 uint32_t lastSendTime = 0;
 uint32_t inicioMedia = 0;
@@ -355,43 +358,6 @@ bool validateStatusWIFI()
     tentativas = 0;
   }
   return tentativas == 0;
-}
-
-void ListDevices()
-{
-  Advertisements adv;
-  String device;
-  String macAddressDevice;
-  uint8_t* payload = nullptr;
-  size_t length = 0;
-
-  foundDevices = pBLEScan->start(3);
-  int deviceCount = foundDevices.getCount();
-  
-  Serial.printf("Founded Devices: %d\n", deviceCount);
-  lastScanTime = millis(); 
-
-  for (uint32_t i = 0; i < deviceCount; i++)
-  {
-    BLEAdvertisedDevice advertisedDevice = foundDevices.getDevice(i);
-    device = advertisedDevice.toString().c_str();
-    macAddressDevice = device.substring(device.indexOf("Address: ")+9,device.indexOf("Address: ")+26);
-    macAddressDevice.toUpperCase();
-
-    payload = advertisedDevice.getPayload();
-    length = advertisedDevice.getPayloadLength();
-
-    adv.setDevice(advertisedDevice);
-    adv.setMacAddress(macAddressDevice.c_str());
-    adv.setPayload(payload, length);
-    adv.setRssi(advertisedDevice.getRSSI());
-
-    adv.processIBeacon();
-    adv.processTelemetry();
-    adv.processAccelerometer();
-  }
-    
-  pBLEScan->clearResults();
 }
 
 void IRAM_ATTR resetModule() {
@@ -889,18 +855,21 @@ void setup() {
     esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
     esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_SCAN , ESP_PWR_LVL_P9);
 
-    BLEDevice::init(""); 
+    BLEDevice::init("");
+    
     pBLEScan = BLEDevice::getScan();
     pBLEScan->setActiveScan(true);
     pBLEScan->setInterval(2000);
-    pBLEScan->setWindow(1999);
+    pBLEScan->setWindow(1999); 
+    
 
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
     pAdvertising->setScanResponse(true);
     pAdvertising->setMinPreferred(0x06);
     pAdvertising->setMinPreferred(0x12);
     BLEDevice::startAdvertising();
-    distributor = new Distributor(User::getAllUsers(), TIME_MEDIA, SCAN_INTERVAL);
+    distributor = new Distributor(User::getAllUsers(), TIME_MEDIA, SCAN_INTERVAL, pBLEScan);
+    
   }
 }
 

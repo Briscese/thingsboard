@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <vector>
 #include "headers/User.h"
+#include <BLEScan.h>
+#include "headers/Advertisements.h"
 
 class Distributor {
 private:
@@ -14,12 +16,15 @@ private:
     unsigned long lastSendTime;
     int TIME_MEDIA;
     int SCAN_INTERVAL;
+    BLEScan* pBLEScan;
+    Advertisements* advertisements;
 
     void loggedIn(int pos);
 
 public:
     // Construtor que recebe a referência para o vetor de usuários
-    Distributor(std::vector<User>& users, int timeMedia, int scanInterval);
+    Distributor(std::vector<User>& users, int timeMedia, int scanInterval, BLEScan* pBLEScan);
+    ~Distributor() { if (advertisements) delete advertisements; }
     
     // Método principal que executa o loop
     void process();

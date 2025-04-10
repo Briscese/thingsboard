@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <BLEAdvertisedDevice.h>
+#include <BLEScan.h>
 #include <string>
 #include <vector>
 
@@ -76,6 +77,7 @@ public:
     void processIBeacon();
     void processTelemetry();
     void processAccelerometer();
+    void ListDevices(BLEScanResults foundDevices);
 };
 
 #endif // ADVERTISEMENTS_H 

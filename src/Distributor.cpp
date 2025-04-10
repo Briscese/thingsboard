@@ -1,17 +1,19 @@
 #include "headers/Distributor.h"
 #include <BLEDevice.h>
+#include "headers/Advertisements.h"
 
 extern void postIn(String userId, int media, String tempo, String mac, int deviceType, int batteryLevel, float x, float y, float z, float timeActivity);
-extern void ListDevices();
 
-Distributor::Distributor(std::vector<User>& users, int timeMedia, int scanInterval) 
+Distributor::Distributor(std::vector<User>& users, int timeMedia, int scanInterval, BLEScan* pBLEScan) 
     : users(users),
       sending(false),
       inicioMedia(0),
       lastScanTime(0),
       lastSendTime(0),
       TIME_MEDIA(timeMedia),
-      SCAN_INTERVAL(scanInterval)
+      SCAN_INTERVAL(scanInterval),
+      pBLEScan(pBLEScan),
+      advertisements(new Advertisements())
 {
 }
 
@@ -172,9 +174,8 @@ void Distributor::process()
     {
         sending = true;
         Serial.println("\nIniciando processo de envio");
-        int i = 0;
 
-        Serial.printf("\nallUsers.size: \n %d", users.size(),"\n");
+        Serial.printf("\nallUsers.size: \n %d", users.size());
 
         for (int i = 0; i < users.size(); i++) 
         {
@@ -196,23 +197,33 @@ void Distributor::process()
                       users[i].getTimeActivity());
                 delay(100);
             }
-            i++;
         }
 
         inicioMedia = millis();
         sending = false;
         Serial.printf("\nFINISH ENDING PROCESS\n");
     }
-    else if (millis() - lastScanTime > SCAN_INTERVAL && BLEDevice::getInitialized() == true && sending == false) 
+    else if (millis() - lastScanTime > SCAN_INTERVAL && BLEDevice::getInitialized() == true && !sending) 
     { 
         Serial.printf("\nTIME to ACTIVE: %d\n", millis() - lastSendTime);
         Serial.println("\nSCAN BLE...");
-        ListDevices();
+        
+        if (advertisements != nullptr) {
+            BLEScanResults foundDevices = pBLEScan->start(3);
+            advertisements->ListDevices(foundDevices);
+            pBLEScan->clearResults();
+            lastScanTime = millis();
+        }
     }
     else
     {
         if(sending)
             Serial.printf("\nEm processo de envio: sending == true\n");
-        Serial.printf("\n.");
+        else {
+            static const char spinner[] = {'|', '/', '-', '\\'};
+            static int spinnerPos = 0;
+            Serial.printf("\r[%c] Procurando dispositivos...", spinner[spinnerPos]);
+            spinnerPos = (spinnerPos + 1) % 4;
+        }
     }
 } 

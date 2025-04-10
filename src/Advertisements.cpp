@@ -7,14 +7,8 @@
 #include <Arduino.h>
 #include "headers/Distributor.h"
 #include "esp_log.h"
-
-static const char* TAG = "BEACON_SCANNER";
-
-// Configuração do nível de log
-#ifdef CONFIG_LOG_DEFAULT_LEVEL
-#undef CONFIG_LOG_DEFAULT_LEVEL
-#endif
-#define CONFIG_LOG_DEFAULT_LEVEL ESP_LOG_INFO
+#include <BLEScan.h>
+#include <BLEDevice.h>
 
 #define ENDIAN_CHANGE_U16(x) ((((x)&0xFF000000)>>24) + (((x)&0x00FF0000)>>8) + ((((x)&0xFF00)<<8) + (((x)&0xFF)<<24)))
 extern Distributor* distributor;
@@ -181,8 +175,30 @@ void Advertisements::processAccelerometer() {
         
         deviceType = 4;
         deviceCode = macTemp;
-        if (distributor != nullptr) {
+        if (distributor != nullptr)
             distributor->UserRegisterData(macAddress.c_str(), deviceCode.c_str(), rssi, deviceType, batteryLevel, x, y, z, timeActivity);
-        }
     }
 } 
+
+void Advertisements::ListDevices(BLEScanResults foundDevices)
+{
+    int deviceCount = foundDevices.getCount();
+    Serial.printf("Dispositivos encontrados: %d\n", deviceCount);
+
+    for (uint32_t i = 0; i < deviceCount; i++)
+    {
+        BLEAdvertisedDevice advertisedDevice = foundDevices.getDevice(i);
+        String deviceStr = advertisedDevice.toString().c_str();
+        String macAddressDevice = deviceStr.substring(deviceStr.indexOf("Address: ")+9, deviceStr.indexOf("Address: ")+26);
+        macAddressDevice.toUpperCase();
+
+        setDevice(advertisedDevice);
+        setMacAddress(macAddressDevice.c_str());
+        setPayload(advertisedDevice.getPayload(), advertisedDevice.getPayloadLength());
+        setRssi(advertisedDevice.getRSSI());
+
+        processIBeacon();
+        processTelemetry();
+        processAccelerometer();
+    }
+}
