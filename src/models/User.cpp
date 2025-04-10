@@ -1,4 +1,6 @@
-#include "User.h"
+#include "headers/User.h"
+
+std::vector<User> User::allUsers;
 
 User::User() : 
     loggedIn(false),

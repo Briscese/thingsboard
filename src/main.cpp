@@ -24,11 +24,9 @@
 #include <iostream>
 #include <cmath>
 #include <map>
-#include "models/User.h"
-
-extern void GetIBeacon(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length);
-extern void GetTelemetry(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length);
-extern void GetAccelerometer(BLEAdvertisedDevice advertisedDevice, uint8_t* payload, size_t length);
+#include "headers/User.h"
+#include "headers/Distributor.h"
+#include "headers/Advertisements.h"
 
 WiFiServer server(80);
 HTTPClient http;
@@ -81,7 +79,6 @@ struct readsvertor {
 };
 
 std::vector<readsvertor> allreads;
-std::vector<User> allUsers;
 
 struct CompanyIdentifier {
     uint16_t code;
@@ -110,6 +107,8 @@ long EndFindPressed;
 const int wdtTimeout = 300000;  // time in ms to watchdog --> 5 minutos
 hw_timer_t *timer = NULL;
 int battery_pin = A3;
+
+Distributor* distributor = nullptr;
 
 std::vector<std::string> split(std::string stringToBeSplitted, std::string delimeter)
 {
@@ -158,17 +157,6 @@ std::vector<std::string> separatestring(std::string str, int n)
 
   }
   return returnString;
-}
-
-int findUser(String id) {
-  int i = 0;
-  while (i < allUsers.size()) {
-    if (allUsers[i].getId() == id) {
-      return i;
-    }
-    i++;
-  }
-  return -1;
 }
 
 void activeSoftAP() {
@@ -369,129 +357,13 @@ bool validateStatusWIFI()
   return tentativas == 0;
 }
 
-void registraDadosDoUsuario(String macAddress, String code, int rssiBLE, int deviceType, int batterylevel, float x, float y, float z, float timeActivity)
-{
-  if (allUsers.size() == 0) 
-  {
-    inicioMedia = millis();
-    User firstUser;
-    firstUser.setId(code);
-    firstUser.setBatteryLevel(batterylevel);
-    firstUser.setX(x);
-    firstUser.setY(y);
-    firstUser.setZ(z);
-    firstUser.updateAnalog((rssiBLE * -1));
-    firstUser.addMediaRssi(firstUser.getAnalog().getValue());
-    firstUser.setTempo(formattedDate);
-    firstUser.setMac(macAddress);
-    firstUser.setTimeActivity(timeActivity);
-    firstUser.setDeviceTypeUser(deviceType);
-    allUsers.push_back(firstUser);
-  }
-  else 
-  {
-    int foundUser = 0;
-    foundUser = findUser(code);
-    if (foundUser != -1) {
-      if(allUsers[foundUser].getBatteryLevel() == 0 && batterylevel > 0)
-      {
-        allUsers[foundUser].setBatteryLevel(batterylevel);
-      }
-      allUsers[foundUser].setX(x);
-      allUsers[foundUser].setY(y);
-      allUsers[foundUser].setZ(z);
-
-      allUsers[foundUser].updateAnalog((rssiBLE * -1));
-      allUsers[foundUser].addMediaRssi(allUsers[foundUser].getAnalog().getValue());
-      allUsers[foundUser].setTempo(formattedDate);
-      allUsers[foundUser].setTimeActivity(timeActivity);
-    }
-    else 
-    {
-      User newUser;
-      newUser.setId(code);
-      newUser.setBatteryLevel(batterylevel);
-      newUser.setX(x);
-      newUser.setY(y);
-      newUser.setZ(z);
-      newUser.updateAnalog((rssiBLE * -1));
-      newUser.addMediaRssi(newUser.getAnalog().getValue());
-      newUser.setTempo(formattedDate);
-      newUser.setMac(macAddress);
-      newUser.setDeviceTypeUser(deviceType);
-      newUser.setTimeActivity(timeActivity);
-      allUsers.push_back(newUser);
-    }
-  }
-}
-
-double CalculateDistance(double sinalPower)
-{
-  if (sinalPower == 0) 
-    return 0.0;
-
-  const double n = 2.8; 
-  const double A = -60;
-  double B = 0.0;
-
-  switch ((int)sinalPower) {
-    case -90 ... -86:
-      B = 5.5;
-      break;
-    case -85 ... -83:
-      B = 5.2;
-      break;
-    case -82 ... -81:
-      B = 5.0;
-      break;
-    case -80 ... -78:
-      B = 4.8;
-      break;
-    case -77 ... -76:
-      B = 4.5;
-      break;
-    case -75 ... -73:
-      B = 4.2;
-      break;
-    case -72 ... -71:
-      B = 4.0;
-      break;
-    case -69 ... -67:
-      B = 3.2;
-      break;
-    case -66 ... -65:
-      B = 2.8;
-      break;
-    case -64:
-      B = 2.5;
-      break;
-    case -63:
-      B = 2.0;
-      break;
-    case -62:
-      B = 1.5;
-      break;
-    case -61:
-      B = 1.0;
-      break;
-    default:
-      B = 0.0;
-      break;
-  }  
-  double distance = pow(10, (A - sinalPower) / (10 * n)) + B;
-  
-  Serial.printf("distance: %f\n", distance);
-  return distance;
-}
-
 void ListDevices()
 {
-  BLEAdvertisedDevice advertisedDevice;
+  Advertisements adv;
   String device;
   String macAddressDevice;
   uint8_t* payload = nullptr;
   size_t length = 0;
-  std::string serviceData;
 
   foundDevices = pBLEScan->start(3);
   int deviceCount = foundDevices.getCount();
@@ -501,7 +373,7 @@ void ListDevices()
 
   for (uint32_t i = 0; i < deviceCount; i++)
   {
-    advertisedDevice = foundDevices.getDevice(i);
+    BLEAdvertisedDevice advertisedDevice = foundDevices.getDevice(i);
     device = advertisedDevice.toString().c_str();
     macAddressDevice = device.substring(device.indexOf("Address: ")+9,device.indexOf("Address: ")+26);
     macAddressDevice.toUpperCase();
@@ -509,57 +381,22 @@ void ListDevices()
     payload = advertisedDevice.getPayload();
     length = advertisedDevice.getPayloadLength();
 
-    GetIBeacon(advertisedDevice, payload, length);
-    GetTelemetry(advertisedDevice, payload, length);
-    GetAccelerometer(advertisedDevice, payload, length);
+    adv.setDevice(advertisedDevice);
+    adv.setMacAddress(macAddressDevice.c_str());
+    adv.setPayload(payload, length);
+    adv.setRssi(advertisedDevice.getRSSI());
+
+    adv.processIBeacon();
+    adv.processTelemetry();
+    adv.processAccelerometer();
   }
     
   pBLEScan->clearResults();
 }
 
-int CalculateMode(const std::vector<int>& numbers) {
-    
-    int more_repeat = 0;
-    int repeat = 0;
-    int counter = 0;
-
-    for (int i = 0; i < numbers.size(); i++) {
-      more_repeat = numbers[0];
-      repeat = 0;
-      counter = 0;
-      if(numbers[i] == numbers[i+1]){
-        repeat++;
-      }else{
-        repeat = 1;
-      }
-
-      if(repeat > counter){
-        counter = repeat;
-        more_repeat = numbers[i];
-      }
-    }
-
-    Serial.printf("Moda: %d\n", more_repeat);
-
-    return more_repeat;
-}
-
 void IRAM_ATTR resetModule() {
   ets_printf("reboot\n");
   esp_restart();
-}
-
-void loggedIn(int pos) {
-  if (allUsers[pos].getMediasRssi().size() >= 3) {
-    allUsers[pos].setLoggedIn(true);
-    Serial.print("Device loggedIn: ");
-    Serial.println(allUsers[pos].getMediasRssi().size());
-  }
-  else {
-    Serial.println("Device NOT loggedIn: Minimum (3)");
-    allUsers[pos].setLoggedIn(false);
-    allUsers[pos].setVezes(0);
-  }
 }
 
 void updatePreferences(){
@@ -936,186 +773,79 @@ String initStringOrInt(String messageToVerify){
   
 }
 
-bool isZero(String messageToVerify){
-  if(messageToVerify.startsWith("0")){
-    return true;
-  } else {
-    return false;
-  }
-}
-
-void LoopingsDeDados()
-{
-  if (millis() - inicioMedia > TIME_MEDIA) 
-  {
-    sending = true;
-    Serial.println();
-    Serial.println("Iniciando processo de envio");
-    int i = 0;
-
-    Serial.println();
-    Serial.print("allUsers.size: ");
-    Serial.println(allUsers.size());
-    Serial.println();
-
-    while (i < allUsers.size()) 
-    {
-      Serial.println();
-      Serial.println("-----------------------User postIn---------------------------");
-      Serial.print(F("Device: "));
-      Serial.println(allUsers[i].getId());
-      Serial.print("Sending...(");
-      Serial.print(i+1);
-      Serial.println(")");
-
-      loggedIn(i);
-      if (allUsers[i].isLoggedIn())
-      {
-          int mode = CalculateMode(allUsers[i].getMediasRssi());
-          CalculateDistance(mode*-1);
-          allUsers[i].clearMediasRssi();
-          allUsers[i].incrementVezes();
-          
-          postIn(allUsers[i].getId(), mode, allUsers[i].getTempo(), allUsers[i].getMac(), 
-                allUsers[i].getDeviceTypeUser(), allUsers[i].getBatteryLevel(), 
-                allUsers[i].getX(), allUsers[i].getY(), allUsers[i].getZ(), 
-                allUsers[i].getTimeActivity());
-          delay(100);
-      }
-      i++;
+void loadErrorMode() {
+    timerWrite(timer, 0); //reset timer (feed watchdog)
+    if (millis() - initErrorMode > MAX_ERROR_MODE) {
+        preferences.begin("my-app", false);
+        preferences.putInt("qtdErros", 0);
+        preferences.putString("erros", "");
+        preferences.end();
+        ESP.restart();
     }
 
-    inicioMedia = millis();
-    sending = false;
-    Serial.println();
-    Serial.println("Encerrando processo de envio");
-  }
-  else if (millis() - lastScanTime > SCAN_INTERVAL && BLEDevice::getInitialized() == true && sending == false) 
-  { 
-    Serial.println(); 
-    Serial.print("TIME to ACTIVE: ");
-    Serial.println(millis() - lastSendTime);
+    WiFiClient client = server.available();   // Listen for incoming clients
 
-    Serial.println(); 
-    Serial.print("SCAN BLE");
-    Serial.print(".");
-    Serial.print(".");
-    Serial.println("."); 
-    ListDevices();
-  }
-  else
-  {
-    if(sending == true)
-    {
-      Serial.println("Em processo de envio: sending == true");
-    }
-    else
-    {
-      Serial.print(".");
-    }
-  }
-}
+    if (client) {                             // If a new client connects,
+        preferences.begin("my-app", false);
+        String s = preferences.getString("erros", "yyy");
+        int erros = preferences.getInt("qtdErros", 0);
+        String currentLine = "";                // make a String to hold incoming data from the client
+        while (client.connected()) {            // loop while the client's connected
+            timerWrite(timer, 0); //reset timer (feed watchdog)
+            
+            if (client.available()) {             // if there's bytes to read from the client,
+                char c = client.read();             // read a byte, then
+                Serial.write(c);                    // print it out the serial monitor
+                header += c;
+                if (c == '\n') {                    // if the byte is a newline character
+                    if (currentLine.length() == 0) {
+                        client.println("HTTP/1.1 200 OK");
+                        client.println("Content-type:text/html");
+                        client.println("Connection: close");
+                        client.println();
 
-void loadErrorMode(){
-  timerWrite(timer, 0); //reset timer (feed watchdog)
-  if (millis() - initErrorMode > MAX_ERROR_MODE) {
-    preferences.begin("my-app", false);
-    preferences.putInt("qtdErros", 0);
-    preferences.putString("erros", "");
-    preferences.end();
-    ESP.restart();
-  }
+                        client.println("<!DOCTYPE html><html>");
+                        client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+                        client.println("<link rel=\"icon\" href=\"data:,\">");
+                        client.println("<style>");
+                        client.println("body {");
+                        client.println("background-color: #f5ab00;");
+                        client.println("}");
+                        client.println("</style");
 
-  WiFiClient client = server.available();   // Listen for incoming clients
+                        client.println("<body><h1> ESP32-LOG DE ERROS</h1>");
+                        client.println("<hr>");
+                        client.println("<p>" + s + "</p>");
+                        client.println("<div style='text-align: center;'>");
+                        client.println("<a href=\"/?buttonRestart\"\"><button style='font-size:150%; background-color:lightblue; color:red;border-radius:100px;'>RESET</button></a>");
+                        client.println("</div>");
 
-  if (client) {                             // If a new client connects,
-    ////Serial.println("New Client.");
-    preferences.begin("my-app", false);
-    ////Serial.println("Enviando...");
-    String s = preferences.getString("erros", "yyy");
-    int erros = preferences.getInt("qtdErros", 0);// print a message out in the serial port
-    String currentLine = "";                // make a String to hold incoming data from the client
-    while (client.connected()) {            // loop while the client's connected
-      timerWrite(timer, 0); //reset timer (feed watchdog)
-      
-      if (client.available()) {             // if there's bytes to read from the client,
-        char c = client.read();             // read a byte, then
-        Serial.write(c);                    // print it out the serial monitor
-        header += c;
-        if (c == '\n') {                    // if the byte is a newline character
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request, so send a response:
-          if (currentLine.length() == 0) {
-            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-            // and a content-type so the client knows what's coming, then a blank line:
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println("Connection: close");
-            client.println();
+                        if (header.indexOf("?buttonRestart") > 0) {
+                            preferences.begin("my-app", false);
+                            preferences.putInt("qtdErros", 0);
+                            preferences.putString("erros", "");
+                            preferences.end();
+                            client.println("<h1 style='text-align: center;'>PLACA REINICIADA</h1>");
+                            delay(5000);
+                            ESP.restart();
+                        }
 
-            // Display the HTML web page
-            client.println("<!DOCTYPE html><html>");
-            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-            client.println("<link rel=\"icon\" href=\"data:,\">");
-            // CSS to style the on/off buttons
-            // Feel free to change the background-color and font-size attributes to fit your preferences
-            client.println("<style>");
-            client.println("body {");
-            client.println("background-color: #f5ab00;");
-            client.println("}");
-            client.println("</style");
-
-
-            // Web Page Heading
-            client.println("<body><h1> ESP32-LOG DE ERROS</h1>");
-            client.println("<hr>");
-            client.println("<p>" + s + "</p>");
-            client.println("<div style='text-align: center;'>");
-            client.println("<a href=\"/?buttonRestart\"\"><button style='font-size:150%; background-color:lightblue; color:red;border-radius:100px;'>RESET</button></a>");
-            client.println("</div>");
-            client.println("");
-            client.println("");
-            client.println("");
-            client.println("");
-            client.println("");
-            client.println("");
-            client.println("");
-
-            //controls the Arduino if you press the buttons
-            if (header.indexOf("?buttonRestart") > 0) {
-              preferences.begin("my-app", false);
-              preferences.putInt("qtdErros", 0);
-              preferences.putString("erros", "");
-              preferences.end();
-              client.println("<h1 style='text-align: center;'>PLACA REINICIADA</h1>");
-              delay(5000);
-              ESP.restart();
+                        client.println("</body></html>");
+                        client.stop();
+                        delay(1);
+                        preferences.end();
+                        break;
+                    } else {
+                        currentLine = "";
+                    }
+                } else if (c != '\r') {
+                    currentLine += c;
+                }
             }
-
-
-            client.println("</body></html>");
-            client.stop();
-            delay(1);
-
-            // The HTTP response ends with another blank line
-            //client.println();
-            preferences.end();
-            // Break out of the while loop
-            break;
-          } else { // if you got a newline, then clear currentLine
-            currentLine = "";
-          }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
         }
-      }
+        header = "";
+        client.stop();
     }
-    // Clear the header variable
-    header = "";
-    client.stop();
-    ////Serial.println("Client disconnected.");
-    ////Serial.println("");
-  }
 }
 
 void setup() {
@@ -1145,15 +875,16 @@ void setup() {
 
     BLEDevice::init(""); 
     pBLEScan = BLEDevice::getScan();
-    pBLEScan->setActiveScan(true);  //active scan uses more power, but get results faster
+    pBLEScan->setActiveScan(true);
     pBLEScan->setInterval(2000);
-    pBLEScan->setWindow(1999);  // less or equal setInterval value
+    pBLEScan->setWindow(1999);
 
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
     pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+    pAdvertising->setMinPreferred(0x06);
     pAdvertising->setMinPreferred(0x12);
     BLEDevice::startAdvertising();
+    distributor = new Distributor(User::getAllUsers(), TIME_MEDIA, SCAN_INTERVAL);
   }
 }
 
@@ -1165,12 +896,14 @@ void loop() {
   }
   else 
   {
-    timerWrite(timer, 0); //reset timer (feed watchdog)
+    timerWrite(timer, 0);
 
     if(validateStatusWIFI())
     {
       timeClient.forceUpdate();
-      LoopingsDeDados();
+      if (distributor != nullptr) {
+        distributor->process();
+      }
       getOn(sendId);
     }
   }

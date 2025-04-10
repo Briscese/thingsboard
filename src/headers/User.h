@@ -21,9 +21,12 @@ private:
     float timeActivity;
     ResponsiveAnalogRead analog;
 
+    static std::vector<User> allUsers;
+
 public:
     User();
     
+    // Getters existentes
     String getId() const { return id; }
     const std::vector<int>& getMediasRssi() const { return mediasRssi; }
     bool isLoggedIn() const { return loggedIn; }
@@ -38,6 +41,7 @@ public:
     float getTimeActivity() const { return timeActivity; }
     ResponsiveAnalogRead& getAnalog() { return analog; }
 
+    // Setters existentes
     void setId(const String& value) { id = value; }
     void addMediaRssi(int value) { mediasRssi.push_back(value); }
     void clearMediasRssi() { mediasRssi.clear(); }
@@ -53,6 +57,10 @@ public:
     void setDeviceTypeUser(int value) { deviceTypeUser = value; }
     void setTimeActivity(float value) { timeActivity = value; }
     void updateAnalog(int value) { analog.update(value); }
+
+    // Métodos estáticos para gerenciar todos os usuários
+    static std::vector<User>& getAllUsers() { return allUsers; }
+    static void clearAllUsers() { allUsers.clear(); }
 };
 
 #endif
