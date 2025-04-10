@@ -429,73 +429,89 @@ void updatePreferences(){
 }
 
 void postIn(String userId, int media, String tempo, String mac, int deviceType, int batteryLevel, float x, float y, float z, float timeActivity) {
-  if (validateStatusWIFI()) 
-  {
-    String json;
-    const size_t capacity = JSON_OBJECT_SIZE(25);
-    DynamicJsonDocument doc(capacity);
-
-    const char* timeNow = tempo.c_str();
-
-    timeClient.forceUpdate(); // Atualização do tempo para poder enviar o "timing" correto
-    String sendTime = timeClient.getFormattedTime();
-    const char* timeMicrocontroller = sendTime.c_str();
-    
-    if(userId.startsWith("Itag_") && tagPressed == true){
-       doc["iTagPressed"] = "true";
-       tagPressed = false;
+    Serial.printf("\n📡 POST para API - Dispositivo %s:\n", mac);
+    Serial.printf("┌──────────────────────────────────\n");
+    Serial.printf("│ 👤 Usuário: %s\n", userId);
+    Serial.printf("│ 📊 Média RSSI: %d\n", media);
+    Serial.printf("│ ⏰ Tempo: %s\n", tempo);
+    Serial.printf("│ 📱 MAC: %s\n", mac);
+    Serial.printf("│ 🔢 Tipo: %d\n", deviceType);
+    Serial.printf("│ 🔋 Bateria: %d%%\n", batteryLevel);
+    if (deviceType == 4) {  // Se for acelerômetro
+        Serial.printf("│ 🎯 Acelerômetro:\n");
+        Serial.printf("│   ➡️ X: %.2f\n", x);
+        Serial.printf("│   ⬆️ Y: %.2f\n", y);
+        Serial.printf("│   ↗️ Z: %.2f\n", z);
     }
-    
-       doc["iTagPressed"] = "true";
-       findPressed = false;
-    
-    
-    /*if(deviceType == 2)
+    Serial.printf("│ ⏱️ Tempo Ativo: %.1f dias\n", timeActivity);
+    Serial.printf("└──────────────────────────────────\n");
+    if (validateStatusWIFI()) 
     {
-       doc["userCode"] = userId.toInt();
-    } else {
-       doc["deviceCode"] = userId;
-    }*/
+      String json;
+      const size_t capacity = JSON_OBJECT_SIZE(25);
+      DynamicJsonDocument doc(capacity);
 
-    doc["userCode"] = userId.toInt();
-    doc["microcontrollerId"] = sendId;
-    doc["typeEvent"] = 1;
-    doc["sinalPower"] = media;
-    doc["timeInOut"] = timeMicrocontroller;
-    doc["timeInOutUser"] = timeNow;
-    doc["version"] = "1";
-    //doc["deviceType"] = deviceType; // deviceType 1 = itag | 2 = smartphone | 3 = watchband | 4 = card
-    doc["deviceCode"] = "Card_" + userId;
-    doc["macAddress"] = mac;
-    doc["x"] = x;
-    doc["y"] = y;
-    doc["z"] = z;
-    doc["batteryLevel"] = batteryLevel;
-    doc["timeActivity"] = timeActivity;
+      const char* timeNow = tempo.c_str();
 
-    serializeJson(doc, json);
-    Serial.println(json);
-    Serial.println(apiUrl+"/PostLocation");
-    
-    if (http.begin((apiUrl + "/PostLocation").c_str())) 
-    {
-      http.addHeader("Content-Type", "application/json");
-      http.setTimeout(15000);
+      timeClient.forceUpdate(); // Atualização do tempo para poder enviar o "timing" correto
+      String sendTime = timeClient.getFormattedTime();
+      const char* timeMicrocontroller = sendTime.c_str();
+      
+      if(userId.startsWith("Itag_") && tagPressed == true){
+         doc["iTagPressed"] = "true";
+         tagPressed = false;
+      }
+      
+         doc["iTagPressed"] = "true";
+         findPressed = false;
+      
+      
+      /*if(deviceType == 2)
+      {
+         doc["userCode"] = userId.toInt();
+      } else {
+         doc["deviceCode"] = userId;
+      }*/
 
-      int httpCode = http.POST(json);
-      Serial.print("HTTPCODE: ");
-      Serial.println(httpCode);
+      doc["userCode"] = userId.toInt();
+      doc["microcontrollerId"] = sendId;
+      doc["typeEvent"] = 1;
+      doc["sinalPower"] = media;
+      doc["timeInOut"] = timeMicrocontroller;
+      doc["timeInOutUser"] = timeNow;
+      doc["version"] = "1";
+      //doc["deviceType"] = deviceType; // deviceType 1 = itag | 2 = smartphone | 3 = watchband | 4 = card
+      doc["deviceCode"] = "Card_" + userId;
+      doc["macAddress"] = mac;
+      doc["x"] = x;
+      doc["y"] = y;
+      doc["z"] = z;
+      doc["batteryLevel"] = batteryLevel;
+      doc["timeActivity"] = timeActivity;
 
-      String result = http.getString();
-      DynamicJsonDocument payload(4776);
-      deserializeJson(payload, result);
-      Serial.println(result);
-      _id = payload["_id"].as<String>();
-      http.end();
-    } else {
-      Serial.println("Erro na conexão");
+      serializeJson(doc, json);
+      Serial.println(json);
+      Serial.println(apiUrl+"/PostLocation");
+      
+      if (http.begin((apiUrl + "/PostLocation").c_str())) 
+      {
+        http.addHeader("Content-Type", "application/json");
+        http.setTimeout(15000);
+
+        int httpCode = http.POST(json);
+        Serial.print("HTTPCODE: ");
+        Serial.println(httpCode);
+
+        String result = http.getString();
+        DynamicJsonDocument payload(4776);
+        deserializeJson(payload, result);
+        Serial.println(result);
+        _id = payload["_id"].as<String>();
+        http.end();
+      } else {
+        Serial.println("Erro na conexão");
+      }
     }
-  }
 }
 
 void updatePlaca(String url)
