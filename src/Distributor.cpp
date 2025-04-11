@@ -1,8 +1,9 @@
 #include "headers/Distributor.h"
 #include <BLEDevice.h>
 #include "headers/Advertisements.h"
+#include "headers/Connect.h"
 
-extern void postIn(String userId, int media, String tempo, String mac, int deviceType, int batteryLevel, float x, float y, float z, float timeActivity);
+extern Connect* connect;
 
 Distributor::Distributor(std::vector<User>& users, int timeMedia, int scanInterval, BLEScan* pBLEScan) 
     : users(users),
@@ -164,6 +165,80 @@ void Distributor::UserRegisterData(const String& macAddress, const String& code,
             newUser.setDeviceTypeUser(deviceType);
             newUser.setTimeActivity(timeActivity);
             users.push_back(newUser);
+        }
+    }
+}
+
+void Distributor::postIn(String userId, int media, String tempo, String mac, 
+                    int deviceType, int batteryLevel, float x, float y, float z, 
+                    float timeActivity) {
+    Serial.printf("\n📡 POST para API - Dispositivo %s:\n", mac);
+    Serial.printf("┌──────────────────────────────────\n");
+    Serial.printf("│ 👤 Usuário: %s\n", userId);
+    Serial.printf("│ 📊 Média RSSI: %d\n", media);
+    Serial.printf("│ ⏰ Tempo: %s\n", tempo);
+    Serial.printf("│ 📱 MAC: %s\n", mac);
+    Serial.printf("│ 🔢 Tipo: %d\n", deviceType);
+    Serial.printf("│ 🔋 Bateria: %d%%\n", batteryLevel);
+    if (deviceType == 4) {
+        Serial.printf("│ 🎯 Acelerômetro:\n");
+        Serial.printf("│   ➡️ X: %.2f\n", x);
+        Serial.printf("│   ⬆️ Y: %.2f\n", y);
+        Serial.printf("│   ↗️ Z: %.2f\n", z);
+    }
+    Serial.printf("│ ⏱️ Tempo Ativo: %.1f dias\n", timeActivity);
+    Serial.printf("└──────────────────────────────────\n");
+
+    if (connect->validateStatusWIFI()) {
+        String json;
+        const size_t capacity = JSON_OBJECT_SIZE(25);
+        DynamicJsonDocument doc(capacity);
+
+        const char* timeNow = tempo.c_str();
+        String sendTime = connect->getTime();
+        const char* timeMicrocontroller = sendTime.c_str();
+
+        doc["userCode"] = userId.toInt();
+        doc["microcontrollerId"] = connect->getSendId();
+        doc["typeEvent"] = 1;
+        doc["sinalPower"] = media;
+        doc["timeInOut"] = timeMicrocontroller;
+        doc["timeInOutUser"] = timeNow;
+        doc["version"] = "1";
+        doc["deviceCode"] = "Card_" + userId;
+        doc["macAddress"] = mac;
+        doc["x"] = x;
+        doc["y"] = y;
+        doc["z"] = z;
+        doc["batteryLevel"] = batteryLevel;
+        doc["timeActivity"] = timeActivity;
+
+        serializeJson(doc, json);
+        Serial.printf("\n┌──────────────────────────────────\n");
+        Serial.printf("│ 🌐 URL: %s/PostLocation\n", "http://brd-parque-it.pointservice.com.br/api/v1/IOT");
+        Serial.printf("└──────────────────────────────────\n");
+
+        if (http.begin("http://brd-parque-it.pointservice.com.br/api/v1/IOT/PostLocation")) {
+            http.addHeader("Content-Type", "application/json");
+            http.setTimeout(15000);
+
+            int httpCode = http.POST(json);
+            Serial.printf("\n┌──────────────────────────────────\n");
+            Serial.printf("│ 📡 Status: %d %s\n", httpCode, 
+                        httpCode == 200 ? "✅ OK" : 
+                        httpCode >= 500 ? "❌ Erro no Servidor" : 
+                        httpCode >= 400 ? "⚠️ Erro na Requisição" : 
+                        "⚡ Erro na Conexão");
+            Serial.printf("└──────────────────────────────────\n");
+
+            String result = http.getString();
+            DynamicJsonDocument payload(4776);
+            deserializeJson(payload, result);
+            Serial.println(result);
+            _id = payload["_id"].as<String>();
+            http.end();
+        } else {
+            Serial.println("Erro na conexão");
         }
     }
 }

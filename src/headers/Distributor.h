@@ -6,6 +6,8 @@
 #include "headers/User.h"
 #include <BLEScan.h>
 #include "headers/Advertisements.h"
+#include <BLEDevice.h>
+#include <HTTPClient.h>
 
 class Distributor {
 private:
@@ -18,13 +20,14 @@ private:
     int SCAN_INTERVAL;
     BLEScan* pBLEScan;
     Advertisements* advertisements;
+    HTTPClient http;
+    String _id;
 
     void loggedIn(int pos);
 
 public:
     // Construtor que recebe a referência para o vetor de usuários
     Distributor(std::vector<User>& users, int timeMedia, int scanInterval, BLEScan* pBLEScan);
-    ~Distributor() { if (advertisements) delete advertisements; }
     
     // Método principal que executa o loop
     void process();
@@ -34,6 +37,9 @@ public:
     void UserRegisterData(const String& macAddress, const String& code, int rssiBLE, 
                                int deviceType, int batterylevel, float x, float y, float z, 
                                float timeActivity);
+    void postIn(String userId, int media, String tempo, String mac, 
+                int deviceType, int batteryLevel, float x, float y, float z, 
+                float timeActivity);
     
     // Getters e setters
     bool isSending() const { return sending; }
