@@ -1,7 +1,7 @@
 #include <BLEDevice.h>
-#include "headers/Distributor.h"
-#include "headers/Advertisements.h"
-#include "headers/Connect.h"
+#include "Distributor.h"
+#include "Advertisements.h"
+#include "Connect.h"
 
 extern Connect* connect;
 
@@ -298,8 +298,16 @@ void Distributor::process()
         else {
             static const char spinner[] = {'|', '/', '-', '\\'};
             static int spinnerPos = 0;
-            Serial.printf("\r[%c] Searching devices...", spinner[spinnerPos]);
-            spinnerPos = (spinnerPos + 1) % 4;
+            static unsigned long lastSpinnerUpdate = 0;
+            
+            if (millis() - lastSpinnerUpdate > 100) {
+                char buffer[50];
+                sprintf(buffer, "[%c] Searching devices...", spinner[spinnerPos]);
+                Serial.print("\r");
+                Serial.print(buffer);
+                spinnerPos = (spinnerPos + 1) % 4;
+                lastSpinnerUpdate = millis();
+            }
         }
     }
 } 

@@ -1,4 +1,4 @@
-#include "headers/Connect.h"
+#include "Connect.h"
 
 Connect::Connect(const char* name, const char* password, 
                  const char* alternative_name, const char* alternative_password,

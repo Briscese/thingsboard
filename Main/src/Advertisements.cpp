@@ -1,11 +1,11 @@
-#include "headers/Advertisements.h"
+#include "Advertisements.h"
 #include <sstream>
 #include <HTTPUpdate.h>
 #include <cmath>
 #include <BLEAdvertisedDevice.h>
 #include <BLEBeacon.h>
 #include <Arduino.h>
-#include "headers/Distributor.h"
+#include "Distributor.h"
 #include "esp_log.h"
 #include <BLEScan.h>
 #include <BLEDevice.h>

@@ -8,11 +8,11 @@
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <Preferences.h>
-#include "headers/User.h"
-#include "headers/Distributor.h"
-#include "headers/Advertisements.h"
-#include "headers/Connect.h"
-#include "config/Config.h"
+#include "src/models/User.h"
+#include "src/Distributor.h"
+#include "src/Advertisements.h"
+#include "src/Connect.h"
+#include "src/config/Config.h"
 
 BLEScan* pBLEScan;
 Distributor* distributor = nullptr;

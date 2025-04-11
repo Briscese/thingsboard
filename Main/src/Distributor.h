@@ -3,8 +3,8 @@
 
 #include <vector>
 #include <BLEDevice.h>
-#include "headers/User.h"
-#include "headers/Advertisements.h"
+#include "models/User.h"
+#include "Advertisements.h"
 #include <HTTPClient.h>
 
 class Distributor {
