@@ -28,10 +28,7 @@
 #include "headers/Distributor.h"
 #include "headers/Advertisements.h"
 
-#define COLOR_RESET   "\033[0m"
-#define COLOR_IBEACON "\033[38;5;214m"
-#define COLOR_TELEMETRY "\033[38;5;45m"
-#define COLOR_ACCELEROMETER "\033[38;5;84m"
+//TODO: O Próximo passo é conseguir abstrair toda a parte de WI-FI para uma nova classe
 
 WiFiServer server(80);
 HTTPClient http;
@@ -456,8 +453,9 @@ void postIn(String userId, int media, String tempo, String mac, int deviceType, 
       doc["timeActivity"] = timeActivity;
 
       serializeJson(doc, json);
-      Serial.println(json);
-      Serial.println(apiUrl+"/PostLocation");
+      Serial.printf("\n┌──────────────────────────────────\n");
+      Serial.printf("│ 🌐 URL: %s/PostLocation\n", apiUrl.c_str());
+      Serial.printf("└──────────────────────────────────\n");
       
       if (http.begin((apiUrl + "/PostLocation").c_str())) 
       {
@@ -465,8 +463,9 @@ void postIn(String userId, int media, String tempo, String mac, int deviceType, 
         http.setTimeout(15000);
 
         int httpCode = http.POST(json);
-        Serial.print("HTTPCODE: ");
-        Serial.println(httpCode);
+        Serial.printf("\n┌──────────────────────────────────\n");
+        Serial.printf("│ 📡 Status: %d %s\n", httpCode, httpCode == 200 ? "✅ OK" : httpCode >= 500 ? "❌ Erro no Servidor" : httpCode >= 400 ? "⚠️ Erro na Requisição" : "⚡ Erro na Conexão");
+        Serial.printf("└──────────────────────────────────\n");
 
         String result = http.getString();
         DynamicJsonDocument payload(4776);
