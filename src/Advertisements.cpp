@@ -75,24 +75,24 @@ void Advertisements::processIBeacon() {
     manufacturerData.copy((char*) cManufacturerData, manufacturerData.length(), 0);
     
     if(manufacturerData.length() == 25){
-        Serial.printf("\n📦 Dados brutos: ");
+        Serial.printf("\n📦 Raw Data: ");
         for (size_t i = 0; i < manufacturerData.length(); i++) {
             Serial.printf("%02X ", cManufacturerData[i]);   
         }
         Serial.println();
         
-        Serial.printf("🔍 Dispositivo encontrado: %s\n", device.toString().c_str());
+        Serial.printf("🔍 Device Found: %s\n", device.toString().c_str());
         Serial.printf("📶 RSSI: %d dBm\n", device.getRSSI());
         
         BLEBeacon oBeacon = BLEBeacon();
         oBeacon.setData(manufacturerData);
         
-        Serial.printf("\n🏷️  Informações do iBeacon:\n");
+        Serial.printf("\n🏷️  iBeacon Information:\n");
         Serial.printf("🆔 ID: %04X\n", oBeacon.getManufacturerId());
         Serial.printf("📍 Major: %d\n", ENDIAN_CHANGE_U16(oBeacon.getMajor()));
         Serial.printf("📍 Minor: %d\n", ENDIAN_CHANGE_U16(oBeacon.getMinor()));
         Serial.printf("🔑 UUID: %s\n", oBeacon.getProximityUUID().toString().c_str());
-        Serial.printf("⚡ Potência: %d dBm\n", oBeacon.getSignalPower());
+        Serial.printf("⚡ Power: %d dBm\n", oBeacon.getSignalPower());
         Serial.println();
         
         deviceType = 1;
@@ -107,13 +107,13 @@ void Advertisements::processTelemetry() {
     serviceData.copy((char*)data, serviceData.length(), 0);
     
     if (device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFEAA))) {
-        Serial.printf("\n📦 Dados brutos: ");
+        Serial.printf("\n📦 Raw Data: ");
         for (size_t i = 0; i < serviceData.length(); i++) {
             Serial.printf("%02X ", data[i]);   
         }
         Serial.println();
         
-        Serial.printf("🔍 Dispositivo: %s\n", device.toString().c_str());
+        Serial.printf("🔍 Device: %s\n", device.toString().c_str());
         Serial.printf("📶 RSSI: %d dBm\n", device.getRSSI());
         
         if (data[0] == 0x20) {
@@ -123,12 +123,12 @@ void Advertisements::processTelemetry() {
             uint32_t packetCount = (data[6] << 24) | (data[7] << 16) | (data[8] << 8) | data[9];
             uint32_t uptime = (data[10] << 24) | (data[11] << 16) | (data[12] << 8) | data[13];
             
-            Serial.printf("\n📊 Telemetria:\n");
-            Serial.printf("📱 Versão: %d\n", version);
-            Serial.printf("🔋 Bateria: %.2fV (%.1f%%)\n", (float)batteryVoltage / 1000, GetBattery((float)batteryVoltage / 1000));
-            Serial.printf("🌡️ Temperatura: %.2f°C\n", temperature / 256.0);
-            Serial.printf("📝 Pacotes: %u\n", packetCount);
-            Serial.printf("⏱️ Tempo ativo: %.1f dias\n", (uptime / 10.0) / 86400);
+            Serial.printf("\n📊 Telemetry:\n");
+            Serial.printf("📱 Version: %d\n", version);
+            Serial.printf("🔋 Battery: %.2fV (%.1f%%)\n", (float)batteryVoltage / 1000, GetBattery((float)batteryVoltage / 1000));
+            Serial.printf("🌡️ Temperature: %.2f°C\n", temperature / 256.0);
+            Serial.printf("📝 Packets: %u\n", packetCount);
+            Serial.printf("⏱️ Active Time: %.1f days\n", (uptime / 10.0) / 86400);
             Serial.println();
             
             batteryLevel = GetBattery((float)batteryVoltage / 1000);
@@ -150,13 +150,13 @@ void Advertisements::processAccelerometer() {
     serviceData.copy((char*)data, serviceData.length(), 0);
     
     if (data[0] == 0xA1 && device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFFE1))) {
-        Serial.printf("\n📦 Dados brutos: ");
+        Serial.printf("\n📦 Raw Data: ");
         for (size_t i = 0; i < serviceData.length(); i++) {
             Serial.printf("%02X ", data[i]);   
         }
         Serial.println();
         
-        Serial.printf("🔍 Dispositivo Minew: %s\n", device.toString().c_str());
+        Serial.printf("🔍 Minew Device: %s\n", device.toString().c_str());
         Serial.printf("📶 RSSI: %d dBm\n", device.getRSSI());
         
         uint8_t version = data[1];
@@ -165,9 +165,9 @@ void Advertisements::processAccelerometer() {
         y = GetAccelerometer(data[5], data[6]);
         z = GetAccelerometer(data[7], data[8]);
         
-        Serial.printf("\n📱 Versão: %d\n", version);
-        Serial.printf("🔋 Bateria: %d%%\n", batteryLevel);
-        Serial.printf("🎯 Acelerômetro:\n");
+        Serial.printf("\n📱 Version: %d\n", version);
+        Serial.printf("🔋 Battery: %d%%\n", batteryLevel);
+        Serial.printf("🎯 Accelerometer:\n");
         Serial.printf("  ➡️ X: %.2f\n", x);
         Serial.printf("  ⬆️ Y: %.2f\n", y);
         Serial.printf("  ↗️ Z: %.2f\n", z);
@@ -183,7 +183,7 @@ void Advertisements::processAccelerometer() {
 void Advertisements::ListDevices(BLEScanResults foundDevices)
 {
     int deviceCount = foundDevices.getCount();
-    Serial.printf("Dispositivos encontrados: %d\n", deviceCount);
+    Serial.printf("Devices Found: %d\n", deviceCount);
 
     for (uint32_t i = 0; i < deviceCount; i++)
     {

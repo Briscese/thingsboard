@@ -1,33 +1,34 @@
-#include "headers/Distributor.h"
 #include <BLEDevice.h>
+#include "headers/Distributor.h"
 #include "headers/Advertisements.h"
 #include "headers/Connect.h"
 
 extern Connect* connect;
 
-Distributor::Distributor(std::vector<User>& users, int timeMedia, int scanInterval, BLEScan* pBLEScan) 
+const int SCAN_INTERVAL = 3000;
+const int TIME_MEDIA = 100000;
+
+Distributor::Distributor(std::vector<User>& users, BLEScan* pBLEScan) 
     : users(users),
       sending(false),
       inicioMedia(0),
       lastScanTime(0),
       lastSendTime(0),
-      TIME_MEDIA(timeMedia),
-      SCAN_INTERVAL(scanInterval),
       pBLEScan(pBLEScan),
       advertisements(new Advertisements())
 {
 }
 
-double CalculateDistance(double sinalPower)
+double CalculateDistance(double signalPower)
 {
-  if (sinalPower == 0) 
+  if (signalPower == 0) 
     return 0.0;
 
   const double n = 2.8; 
   const double A = -60;
   double B = 0.0;
 
-  switch ((int)sinalPower) {
+  switch ((int)signalPower) {
     case -90 ... -86:
       B = 5.5;
       break;
@@ -71,19 +72,19 @@ double CalculateDistance(double sinalPower)
       B = 0.0;
       break;
   }  
-  double distance = pow(10, (A - sinalPower) / (10 * n)) + B;
+  double distance = pow(10, (A - signalPower) / (10 * n)) + B;
   
   Serial.printf("distance: %f\n", distance);
   return distance;
 }
 
 int CalculateMode(const std::vector<int>& numbers) {
-    int more_repeat = 0;
+    int mostRepeated = 0;
     int repeat = 0;
     int counter = 0;
 
     for (int i = 0; i < numbers.size(); i++) {
-      more_repeat = numbers[0];
+      mostRepeated = numbers[0];
       repeat = 0;
       counter = 0;
       if(numbers[i] == numbers[i+1]){
@@ -94,12 +95,12 @@ int CalculateMode(const std::vector<int>& numbers) {
 
       if(repeat > counter){
         counter = repeat;
-        more_repeat = numbers[i];
+        mostRepeated = numbers[i];
       }
     }
 
-    Serial.printf("Moda: %d\n", more_repeat);
-    return more_repeat;
+    Serial.printf("Mode: %d\n", mostRepeated);
+    return mostRepeated;
 }
 
 void Distributor::loggedIn(int pos) {
@@ -172,21 +173,21 @@ void Distributor::UserRegisterData(const String& macAddress, const String& code,
 void Distributor::postIn(String userId, int media, String tempo, String mac, 
                     int deviceType, int batteryLevel, float x, float y, float z, 
                     float timeActivity) {
-    Serial.printf("\n📡 POST para API - Dispositivo %s:\n", mac);
+    Serial.printf("\n📡 POST to API - Device %s:\n", mac);
     Serial.printf("┌──────────────────────────────────\n");
-    Serial.printf("│ 👤 Usuário: %s\n", userId);
-    Serial.printf("│ 📊 Média RSSI: %d\n", media);
-    Serial.printf("│ ⏰ Tempo: %s\n", tempo);
+    Serial.printf("│ 👤 User: %s\n", userId);
+    Serial.printf("│ 📊 RSSI Average: %d\n", media);
+    Serial.printf("│ ⏰ Time: %s\n", tempo);
     Serial.printf("│ 📱 MAC: %s\n", mac);
-    Serial.printf("│ 🔢 Tipo: %d\n", deviceType);
-    Serial.printf("│ 🔋 Bateria: %d%%\n", batteryLevel);
+    Serial.printf("│ 🔢 Type: %d\n", deviceType);
+    Serial.printf("│ 🔋 Battery: %d%%\n", batteryLevel);
     if (deviceType == 4) {
-        Serial.printf("│ 🎯 Acelerômetro:\n");
+        Serial.printf("│ 🎯 Accelerometer:\n");
         Serial.printf("│   ➡️ X: %.2f\n", x);
         Serial.printf("│   ⬆️ Y: %.2f\n", y);
         Serial.printf("│   ↗️ Z: %.2f\n", z);
     }
-    Serial.printf("│ ⏱️ Tempo Ativo: %.1f dias\n", timeActivity);
+    Serial.printf("│ ⏱️ Active Time: %.1f days\n", timeActivity);
     Serial.printf("└──────────────────────────────────\n");
 
     if (connect->validateStatusWIFI()) {
@@ -226,9 +227,9 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
             Serial.printf("\n┌──────────────────────────────────\n");
             Serial.printf("│ 📡 Status: %d %s\n", httpCode, 
                         httpCode == 200 ? "✅ OK" : 
-                        httpCode >= 500 ? "❌ Erro no Servidor" : 
-                        httpCode >= 400 ? "⚠️ Erro na Requisição" : 
-                        "⚡ Erro na Conexão");
+                        httpCode >= 500 ? "❌ Server Error" : 
+                        httpCode >= 400 ? "⚠️ Request Error" : 
+                        "⚡ Connection Error");
             Serial.printf("└──────────────────────────────────\n");
 
             String result = http.getString();
@@ -238,7 +239,7 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
             _id = payload["_id"].as<String>();
             http.end();
         } else {
-            Serial.println("Erro na conexão");
+            Serial.println("Connection Error");
         }
     }
 }
@@ -248,7 +249,7 @@ void Distributor::process()
     if (millis() - inicioMedia > TIME_MEDIA) 
     {
         sending = true;
-        Serial.println("\nIniciando processo de envio");
+        Serial.println("\nStarting sending process");
 
         Serial.printf("\nallUsers.size: \n %d", users.size());
 
@@ -293,11 +294,11 @@ void Distributor::process()
     else
     {
         if(sending)
-            Serial.printf("\nEm processo de envio: sending == true\n");
+            Serial.printf("\nIn sending process: sending == true\n");
         else {
             static const char spinner[] = {'|', '/', '-', '\\'};
             static int spinnerPos = 0;
-            Serial.printf("\r[%c] Procurando dispositivos...", spinner[spinnerPos]);
+            Serial.printf("\r[%c] Searching devices...", spinner[spinnerPos]);
             spinnerPos = (spinnerPos + 1) % 4;
         }
     }

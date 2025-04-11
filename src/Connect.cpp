@@ -1,21 +1,21 @@
 #include "headers/Connect.h"
 
-Connect::Connect(const char* nome, const char* senha, 
-                 const char* nome_alternativa, const char* senha_alternativa,
+Connect::Connect(const char* name, const char* password, 
+                 const char* alternative_name, const char* alternative_password,
                  const char* server_pwd, int wifi_limit, int max_error_mode)
     : server(80),
       timeClient(ntpUDP, "a.st1.ntp.br", -10800, 60000),
-      NOME(nome),
-      SENHA(senha),
-      NOME_ALTERNATIVA(nome_alternativa),
-      SENHA_ALTERNATIVA(senha_alternativa),
-      server_password(server_pwd),
+      NAME(name),
+      PASSWORD(password),
+      ALTERNATIVE_NAME(alternative_name),
+      ALTERNATIVE_PASSWORD(alternative_password),
+      SERVER_PASSWORD(server_pwd),
       WIFI_LIMIT(wifi_limit),
       MAX_ERROR_MODE(max_error_mode),
       errorMode(false),
       sending(false),
-      tentativas(0),
-      comunicationErrors(0),
+      attempts(0),
+      communicationErrors(0),
       lastSendTime(0),
       initErrorMode(0)
 {
@@ -33,7 +33,7 @@ void Connect::activeSoftAP() {
         }
         preferences.end();
         WiFi.mode(WIFI_AP);
-        WiFi.softAP(s.c_str(), server_password);
+        WiFi.softAP(s.c_str(), SERVER_PASSWORD);
         IPAddress IP = WiFi.softAPIP();
         server.begin();
     }
@@ -52,7 +52,7 @@ void Connect::updatePreferences() {
         if (sendId == s) {
             sendId = s;
         } else {
-            Serial.println("Atualizando nome de placa... (RESET)");
+            Serial.println("Updating board name... (RESET)");
             preferences.putString("idPlaca", sendId);
         }
     } else {
@@ -63,7 +63,7 @@ void Connect::updatePreferences() {
 
 bool Connect::validateStatusWIFI() {
     if (WiFi.RSSI() < WIFI_LIMIT) {
-        Serial.println("Status Wifi: Desconectado (Potência baixa)");
+        Serial.println("WiFi Status: Disconnected (Low Power)");
         Serial.print("RSSI: ");
         Serial.println(WiFi.RSSI());
         
@@ -74,23 +74,23 @@ bool Connect::validateStatusWIFI() {
         serializeJson(doc, json);
 
         preferences.begin("my-app", false);
-        String s = preferences.getString("erros", "yyy");
-        int erros = preferences.getInt("qtdErros", 0);
+        String s = preferences.getString("errors", "yyy");
+        int errors = preferences.getInt("errorCount", 0);
         if (s == "yyy") {
-            preferences.putString("erros", "Erro;Dados<br>ErroWiFi_Out_Range;" + json + "<br>");
-            preferences.putInt("qtdErros", erros + 1);
+            preferences.putString("errors", "Error;Data<br>WiFiError_Out_Range;" + json + "<br>");
+            preferences.putInt("errorCount", errors + 1);
         } else {
-            String saving = s + "ErroWiFi_Out_Range;" + json + "<br>";
-            preferences.putString("erros", saving);
-            preferences.putInt("qtdErros", erros + 1);
+            String saving = s + "WiFiError_Out_Range;" + json + "<br>";
+            preferences.putString("errors", saving);
+            preferences.putInt("errorCount", errors + 1);
         }
         
-        if (erros > 10 && erros < 15) {
+        if (errors > 10 && errors < 15) {
             errorMode = true;
             activeSoftAP();
-        } else if (erros > 15) {
-            preferences.putInt("qtdErros", 0);
-            preferences.putString("erros", "");
+        } else if (errors > 15) {
+            preferences.putInt("errorCount", 0);
+            preferences.putString("errors", "");
         }
         preferences.end();
         
@@ -98,118 +98,118 @@ bool Connect::validateStatusWIFI() {
     }
 
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("Status Wifi: Desconectado");
-        WiFi.begin(NOME, SENHA);
+        Serial.println("WiFi Status: Disconnected");
+        WiFi.begin(NAME, PASSWORD);
         Serial.print("RSSI: ");
         Serial.println(WiFi.RSSI());
 
         while (WiFi.status() != WL_CONNECTED) {
             Serial.print("Network: ");
-            Serial.println(NOME);
+            Serial.println(NAME);
 
-            if (tentativas == 3) {
+            if (attempts == 3) {
                 Serial.print("Network: ");
-                Serial.println(NOME);
-                WiFi.begin(NOME, SENHA);
+                Serial.println(NAME);
+                WiFi.begin(NAME, PASSWORD);
                 Serial.print("RSSI: ");
                 Serial.println(WiFi.RSSI());
             }
 
-            if (tentativas <= 10) {
+            if (attempts <= 10) {
                 delay(1000);
-                Serial.print(tentativas);
+                Serial.print(attempts);
                 Serial.print(".");
 
-                if (tentativas == 10) {
+                if (attempts == 10) {
                     String json;
                     const size_t capacity = JSON_OBJECT_SIZE(8);
                     DynamicJsonDocument doc(capacity);
-                    doc["wifiSsid"] = NOME;
+                    doc["wifiSsid"] = NAME;
                     serializeJson(doc, json);
 
                     preferences.begin("my-app", false);
-                    String s = preferences.getString("erros", "yyy");
-                    int erros = preferences.getInt("qtdErros", 0);
+                    String s = preferences.getString("errors", "yyy");
+                    int errors = preferences.getInt("errorCount", 0);
                     if (s == "yyy") {
-                        preferences.putString("erros", "Erro;Dados<br>ErroWiFi_First_Connection;" + json + "<br>");
-                        preferences.putInt("qtdErros", erros + 1);
+                        preferences.putString("errors", "Error;Data<br>WiFiError_First_Connection;" + json + "<br>");
+                        preferences.putInt("errorCount", errors + 1);
                     } else {
-                        String saving = s + "ErroWiFi_First_Connection;" + json + "<br>";
-                        preferences.putString("erros", saving);
-                        preferences.putInt("qtdErros", erros + 1);
+                        String saving = s + "WiFiError_First_Connection;" + json + "<br>";
+                        preferences.putString("errors", saving);
+                        preferences.putInt("errorCount", errors + 1);
                     }
                     
-                    if (erros > 10 && erros < 15) {
+                    if (errors > 10 && errors < 15) {
                         errorMode = true;
                         activeSoftAP();
                         break;
-                    } else if (erros > 15) {
-                        preferences.putInt("qtdErros", 0);
-                        preferences.putString("erros", "");
+                    } else if (errors > 15) {
+                        preferences.putInt("errorCount", 0);
+                        preferences.putString("errors", "");
                     }
                     preferences.end();
                 }
             } else {
-                if (tentativas == 11) {
+                if (attempts == 11) {
                     Serial.print("Network: ");
-                    Serial.println(NOME_ALTERNATIVA);
-                    WiFi.begin(NOME_ALTERNATIVA, SENHA_ALTERNATIVA);
+                    Serial.println(ALTERNATIVE_NAME);
+                    WiFi.begin(ALTERNATIVE_NAME, ALTERNATIVE_PASSWORD);
                     Serial.print("RSSI: ");
                     Serial.println(WiFi.RSSI());
                 }
                 
-                if (tentativas == 20) {
+                if (attempts == 20) {
                     Serial.print("Network: ");
-                    Serial.println(NOME);
-                    WiFi.begin(NOME, SENHA);
+                    Serial.println(NAME);
+                    WiFi.begin(NAME, PASSWORD);
                     Serial.print("RSSI: ");
                     Serial.println(WiFi.RSSI());
-                    tentativas = 0;
+                    attempts = 0;
 
                     String json;
                     const size_t capacity = JSON_OBJECT_SIZE(8);
                     DynamicJsonDocument doc(capacity);
-                    doc["wifiSsid"] = NOME_ALTERNATIVA;
+                    doc["wifiSsid"] = ALTERNATIVE_NAME;
                     serializeJson(doc, json);
 
                     preferences.begin("my-app", false);
-                    String s = preferences.getString("erros", "yyy");
-                    int erros = preferences.getInt("qtdErros", 0);
+                    String s = preferences.getString("errors", "yyy");
+                    int errors = preferences.getInt("errorCount", 0);
                     if (s == "yyy") {
-                        preferences.putString("erros", "Erro;Dados<br>ErroWiFi_Second_Connection;" + json + "<br>");
-                        preferences.putInt("qtdErros", erros + 1);
+                        preferences.putString("errors", "Error;Data<br>WiFiError_Second_Connection;" + json + "<br>");
+                        preferences.putInt("errorCount", errors + 1);
                     } else {
-                        String saving = s + "ErroWiFi_Second_Connection;" + json + "<br>";
-                        preferences.putString("erros", saving);
-                        preferences.putInt("qtdErros", erros + 1);
+                        String saving = s + "WiFiError_Second_Connection;" + json + "<br>";
+                        preferences.putString("errors", saving);
+                        preferences.putInt("errorCount", errors + 1);
                     }
                     
-                    if (erros > 10 && erros < 15) {
+                    if (errors > 10 && errors < 15) {
                         errorMode = true;
                         activeSoftAP();
                         break;
-                    } else if (erros > 15) {
-                        preferences.putInt("qtdErros", 0);
-                        preferences.putString("erros", "");
+                    } else if (errors > 15) {
+                        preferences.putInt("errorCount", 0);
+                        preferences.putString("errors", "");
                     }
                     preferences.end();
                 }
                 delay(1000);
-                Serial.print(tentativas);
+                Serial.print(attempts);
                 Serial.print(".");
             }
-            tentativas++;
+            attempts++;
         }
-        tentativas = 0;
+        attempts = 0;
     }
-    return tentativas == 0;
+    return attempts == 0;
 }
 
 void Connect::loadErrorMode() {
     if (millis() - initErrorMode > MAX_ERROR_MODE) {
         preferences.begin("my-app", false);
-        preferences.putInt("qtdErros", 0);
-        preferences.putString("erros", "");
+        preferences.putInt("errorCount", 0);
+        preferences.putString("errors", "");
         preferences.end();
         ESP.restart();
     }
@@ -217,8 +217,8 @@ void Connect::loadErrorMode() {
     WiFiClient client = server.available();
     if (client) {
         preferences.begin("my-app", false);
-        String s = preferences.getString("erros", "yyy");
-        int erros = preferences.getInt("qtdErros", 0);
+        String s = preferences.getString("errors", "yyy");
+        int errors = preferences.getInt("errorCount", 0);
         String currentLine = "";
         
         while (client.connected()) {
@@ -242,7 +242,7 @@ void Connect::loadErrorMode() {
                         client.println("}");
                         client.println("</style");
 
-                        client.println("<body><h1> ESP32-LOG DE ERROS</h1>");
+                        client.println("<body><h1> ESP32-ERROR LOG</h1>");
                         client.println("<hr>");
                         client.println("<p>" + s + "</p>");
                         client.println("<div style='text-align: center;'>");
@@ -251,10 +251,10 @@ void Connect::loadErrorMode() {
 
                         if (header.indexOf("?buttonRestart") > 0) {
                             preferences.begin("my-app", false);
-                            preferences.putInt("qtdErros", 0);
-                            preferences.putString("erros", "");
+                            preferences.putInt("errorCount", 0);
+                            preferences.putString("errors", "");
                             preferences.end();
-                            client.println("<h1 style='text-align: center;'>PLACA REINICIADA</h1>");
+                            client.println("<h1 style='text-align: center;'>BOARD RESTARTED</h1>");
                             delay(5000);
                             ESP.restart();
                         }
@@ -278,9 +278,9 @@ void Connect::loadErrorMode() {
 }
 
 void Connect::getOn(String s) {
-    if (millis() - lastSendTime > 1200000) { // TIME_ACTIVE
+    if (millis() - lastSendTime > 1200000) {
         Serial.println();
-        Serial.print("Enviado TURNON: ");
+        Serial.print("Sent TURNON: ");
         Serial.println(s);
         
         lastSendTime = millis();
@@ -309,22 +309,21 @@ void Connect::getOn(String s) {
                         DeserializationError error = deserializeJson(document, result);
 
                         if (!error) {
-                            // Processar resposta
                             if (document["updateURL"]) {
                                 http.end();
-                                updatePlaca(document["updateURL"]);
+                                updateBoard(document["updateURL"]);
                             }
                         }
                     }
                 } else {
-                    comunicationErrors++;
+                    communicationErrors++;
                 }
             }
         }
     }
 }
 
-void Connect::updatePlaca(String url) {
+void Connect::updateBoard(String url) {
     WiFiClient client;
     t_httpUpdate_return ret = httpUpdate.update(client, url, "1.0.0.0");
     switch (ret) {

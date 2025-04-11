@@ -1,12 +1,10 @@
 #ifndef DISTRIBUTOR_H
 #define DISTRIBUTOR_H
 
-#include <Arduino.h>
 #include <vector>
-#include "headers/User.h"
-#include <BLEScan.h>
-#include "headers/Advertisements.h"
 #include <BLEDevice.h>
+#include "headers/User.h"
+#include "headers/Advertisements.h"
 #include <HTTPClient.h>
 
 class Distributor {
@@ -16,8 +14,6 @@ private:
     unsigned long inicioMedia;
     unsigned long lastScanTime;
     unsigned long lastSendTime;
-    int TIME_MEDIA;
-    int SCAN_INTERVAL;
     BLEScan* pBLEScan;
     Advertisements* advertisements;
     HTTPClient http;
@@ -26,22 +22,16 @@ private:
     void loggedIn(int pos);
 
 public:
-    // Construtor que recebe a referência para o vetor de usuários
-    Distributor(std::vector<User>& users, int timeMedia, int scanInterval, BLEScan* pBLEScan);
-    
-    // Método principal que executa o loop
+    Distributor(std::vector<User>& users, BLEScan* pBLEScan);
     void process();
-
-    // Métodos para gerenciamento de usuários
     int findUser(const String& id);
     void UserRegisterData(const String& macAddress, const String& code, int rssiBLE, 
-                               int deviceType, int batterylevel, float x, float y, float z, 
-                               float timeActivity);
+                         int deviceType, int batterylevel, float x, float y, float z, 
+                         float timeActivity);
     void postIn(String userId, int media, String tempo, String mac, 
-                int deviceType, int batteryLevel, float x, float y, float z, 
-                float timeActivity);
+               int deviceType, int batteryLevel, float x, float y, float z, 
+               float timeActivity);
     
-    // Getters e setters
     bool isSending() const { return sending; }
     void setSending(bool value) { sending = value; }
     void setInicioMedia(unsigned long value) { inicioMedia = value; }

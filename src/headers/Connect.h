@@ -2,65 +2,55 @@
 #define CONNECT_H
 
 #include <WiFi.h>
+#include <WiFiClient.h>
+#include <WiFiServer.h>
 #include <HTTPClient.h>
+#include <HTTPUpdate.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
-#include <Preferences.h>
 #include <ArduinoJson.h>
-#include <HTTPUpdate.h>
+#include <Preferences.h>
 
 class Connect {
-private:
-    WiFiServer server;
-    HTTPClient http;
-    Preferences preferences;
-    WiFiUDP ntpUDP;
-    NTPClient timeClient;
-    
-    // Constantes
-    const char* NOME;
-    const char* SENHA;
-    const char* NOME_ALTERNATIVA;
-    const char* SENHA_ALTERNATIVA;
-    const char* server_password;
-    int WIFI_LIMIT;
-    int MAX_ERROR_MODE;
-    
-    // Variáveis de estado
-    bool errorMode;
-    bool sending;
-    String header;
-    String sendId;
-    int tentativas;
-    int comunicationErrors;
-    uint32_t lastSendTime;
-    uint32_t initErrorMode;
-    
-    // Métodos privados
-    void activeSoftAP();
-    void updatePreferences();
-    
 public:
-    Connect(const char* nome, const char* senha, 
-            const char* nome_alternativa, const char* senha_alternativa,
+    Connect(const char* name, const char* password, 
+            const char* alternative_name, const char* alternative_password,
             const char* server_pwd, int wifi_limit, int max_error_mode);
     
+    void activeSoftAP();
+    void updatePreferences();
     bool validateStatusWIFI();
-    void postIn(String userId, int media, String tempo, String mac, 
-                int deviceType, int batteryLevel, float x, float y, float z, 
-                float timeActivity);
-    void getOn(String s);
-    void updatePlaca(String url);
     void loadErrorMode();
-    
-    // Getters
+    void getOn(String s);
+    void updateBoard(String url);
+    String getTime() const { return timeClient.getFormattedTime(); }
+    String getSendId() const { return sendId; }
     bool isErrorMode() const { return errorMode; }
     bool isSending() const { return sending; }
-    String getSendId() const { return sendId; }
-    String getTime() { 
-        timeClient.forceUpdate();
-        return timeClient.getFormattedTime();
-    }
+
+private:
+    WiFiServer server;
+    WiFiUDP ntpUDP;
+    NTPClient timeClient;
+    HTTPClient http;
+    Preferences preferences;
+    
+    const char* NAME;
+    const char* PASSWORD;
+    const char* ALTERNATIVE_NAME;
+    const char* ALTERNATIVE_PASSWORD;
+    const char* SERVER_PASSWORD;
+    const int WIFI_LIMIT;
+    const int MAX_ERROR_MODE;
+    
+    bool errorMode;
+    bool sending;
+    int attempts;
+    int communicationErrors;
+    unsigned long lastSendTime;
+    unsigned long initErrorMode;
+    String sendId;
+    String header;
 };
 
-#endif // CONNECT_H
+#endif
