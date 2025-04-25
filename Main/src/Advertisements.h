@@ -76,7 +76,8 @@ public:
 
     void processIBeacon();
     void processTelemetry();
-    void processAccelerometer();
+    void processAccelerometerMinew();
+    void processAccelerometerMoko();
     void ListDevices(BLEScanResults foundDevices);
 };
 

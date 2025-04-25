@@ -137,7 +137,7 @@ void Advertisements::processTelemetry() {
     }
 }
 
-void Advertisements::processAccelerometer() {
+void Advertisements::processAccelerometerMinew() {
     if(!device.haveServiceData()) return;
 
     std::string deviceStr = device.toString();
@@ -180,6 +180,49 @@ void Advertisements::processAccelerometer() {
     }
 } 
 
+void Advertisements::processAccelerometerMoko(){
+    if(!device.haveServiceData()) return;
+
+    std::string deviceStr = device.toString();
+    std::string macTemp = deviceStr.substr(deviceStr.find("Address: ")+21, 5);
+    macTemp = macTemp.substr(0,2) + macTemp.substr(3,2);
+    std::transform(macTemp.begin(), macTemp.end(), macTemp.begin(), ::toupper);
+
+    std::string serviceData = device.getServiceData();
+    uint8_t data[100];
+    serviceData.copy((char*)data, serviceData.length(), 0);
+    
+    if (data[0] == 0x60 && device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFEAB))) {
+        Serial.printf("\n📦 Raw Data: ");
+        for (size_t i = 0; i < serviceData.length(); i++) {
+            Serial.printf("%02X ", data[i]);   
+        }
+        Serial.println();
+        
+        Serial.printf("🔍 Moko Device: %s\n", device.toString().c_str());
+        Serial.printf("📶 RSSI: %d dBm\n", device.getRSSI());
+        
+        uint8_t version = data[5];
+        batteryLevel = data[12] << 8 | data[13];
+        x = GetAccelerometer(data[6], data[7]);
+        y = GetAccelerometer(data[8], data[9]);
+        z = GetAccelerometer(data[10], data[11]);
+        
+        Serial.printf("\n📱 Version: %d\n", version);
+        Serial.printf("🔋 Battery: %d%%\n", batteryLevel);
+        Serial.printf("🎯 Accelerometer:\n");
+        Serial.printf("  ➡️ X: %.2f\n", x);
+        Serial.printf("  ⬆️ Y: %.2f\n", y);
+        Serial.printf("  ↗️ Z: %.2f\n", z);
+        Serial.println();
+        
+        deviceType = 4;
+        deviceCode = macTemp;
+        if (distributor != nullptr)
+            distributor->UserRegisterData(macAddress.c_str(), deviceCode.c_str(), rssi, deviceType, batteryLevel, x, y, z, timeActivity);
+    }
+}
+
 void Advertisements::ListDevices(BLEScanResults foundDevices)
 {
     int deviceCount = foundDevices.getCount();
@@ -199,6 +242,7 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
 
         processIBeacon();
         processTelemetry();
-        processAccelerometer();
+        processAccelerometerMinew();
+        processAccelerometerMoko();
     }
 }
