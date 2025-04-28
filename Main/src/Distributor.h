@@ -25,12 +25,12 @@ public:
     Distributor(std::vector<User>& users, BLEScan* pBLEScan);
     void process();
     int findUser(const String& id);
-    void UserRegisterData(const String& macAddress, const String& code, int rssiBLE, 
+    void UserRegisterData(const std::string& macAddress, const std::string& code, int rssiBLE, 
                          int deviceType, int batterylevel, float x, float y, float z, 
-                         float timeActivity);
+                         float timeActivity, String frameType, const std::string& bleuuid);
     void postIn(String userId, int media, String tempo, String mac, 
                int deviceType, int batteryLevel, float x, float y, float z, 
-               float timeActivity);
+               float timeActivity, String frameType, String bleuuid);
     
     bool isSending() const { return sending; }
     void setSending(bool value) { sending = value; }
@@ -41,4 +41,4 @@ public:
     std::vector<User>& getUsers() { return users; }
 };
 
-#endif // DISTRIBUTOR_H 
+#endif // DISTRIBUTOR_H

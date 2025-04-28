@@ -18,6 +18,8 @@ private:
     String tempo;
     String mac;
     int deviceTypeUser;
+    String frameType;
+    String bleuuid;
     float timeActivity;
     ResponsiveAnalogRead analog;
 
@@ -38,6 +40,8 @@ public:
     String getTempo() const { return tempo; }
     String getMac() const { return mac; }
     int getDeviceTypeUser() const { return deviceTypeUser; }
+    String getFrameType() const { return frameType; }
+    String getBleuuid() const { return bleuuid; }
     float getTimeActivity() const { return timeActivity; }
     ResponsiveAnalogRead& getAnalog() { return analog; }
 
@@ -51,6 +55,8 @@ public:
     void setY(float value) { y = value; }
     void setZ(float value) { z = value; }
     void incrementVezes() { vezes++; }
+    void setFrameType(const String value) { frameType = value; }
+    void setBleuuid(const String& value) { bleuuid = value; }
     void setVezes(int value) { vezes = value; }
     void setTempo(const String& value) { tempo = value; }
     void setMac(const String& value) { mac = value; }

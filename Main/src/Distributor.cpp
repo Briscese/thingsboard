@@ -125,24 +125,26 @@ int Distributor::findUser(const String& id) {
     return -1;
 }
 
-void Distributor::UserRegisterData(const String& macAddress, const String& code, int rssiBLE, 
-                                       int deviceType, int batterylevel, float x, float y, float z, 
-                                       float timeActivity) {
+void Distributor::UserRegisterData(const std::string& macAddress, const std::string& code, int rssiBLE, 
+                                   int deviceType, int batterylevel, float x, float y, float z, 
+                                   float timeActivity, String frameType, const std::string& bleuuid) {
     if (users.empty()) {
         User firstUser;
-        firstUser.setId(code);
+        firstUser.setId(code.c_str());
         firstUser.setBatteryLevel(batterylevel);
         firstUser.setX(x);
         firstUser.setY(y);
         firstUser.setZ(z);
         firstUser.updateAnalog((rssiBLE * -1));
         firstUser.addMediaRssi(firstUser.getAnalog().getValue());
-        firstUser.setMac(macAddress);
+        firstUser.setMac(macAddress.c_str());
+        firstUser.setFrameType(frameType);
+        firstUser.setBleuuid(bleuuid.c_str());
         firstUser.setTimeActivity(timeActivity);
         firstUser.setDeviceTypeUser(deviceType);
         users.push_back(firstUser);
     } else {
-        int foundUser = findUser(code);
+        int foundUser = findUser(code.c_str());
         if (foundUser != -1) {
             if(users[foundUser].getBatteryLevel() == 0 && batterylevel > 0) {
                 users[foundUser].setBatteryLevel(batterylevel);
@@ -152,18 +154,22 @@ void Distributor::UserRegisterData(const String& macAddress, const String& code,
             users[foundUser].setZ(z);
             users[foundUser].updateAnalog((rssiBLE * -1));
             users[foundUser].addMediaRssi(users[foundUser].getAnalog().getValue());
+            users[foundUser].setFrameType(frameType);
+            users[foundUser].setBleuuid(bleuuid.c_str());
             users[foundUser].setTimeActivity(timeActivity);
         } else {
             User newUser;
-            newUser.setId(code);
+            newUser.setId(code.c_str());
             newUser.setBatteryLevel(batterylevel);
             newUser.setX(x);
             newUser.setY(y);
             newUser.setZ(z);
             newUser.updateAnalog((rssiBLE * -1));
             newUser.addMediaRssi(newUser.getAnalog().getValue());
-            newUser.setMac(macAddress);
+            newUser.setMac(macAddress.c_str());
             newUser.setDeviceTypeUser(deviceType);
+            newUser.setFrameType(frameType);
+            newUser.setBleuuid(bleuuid.c_str());
             newUser.setTimeActivity(timeActivity);
             users.push_back(newUser);
         }
@@ -172,7 +178,7 @@ void Distributor::UserRegisterData(const String& macAddress, const String& code,
 
 void Distributor::postIn(String userId, int media, String tempo, String mac, 
                     int deviceType, int batteryLevel, float x, float y, float z, 
-                    float timeActivity) {
+                    float timeActivity, String frameType, String bleuuid) {
     Serial.printf("\n📡 POST to API - Device %s:\n", mac);
     Serial.printf("┌──────────────────────────────────\n");
     Serial.printf("│ 👤 User: %s\n", userId);
@@ -188,6 +194,8 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
         Serial.printf("│   ↗️ Z: %.2f\n", z);
     }
     Serial.printf("│ ⏱️ Active Time: %.1f days\n", timeActivity);
+    Serial.printf("│    Frame Type: %s\n", frameType);
+    Serial.printf("│    BLEuuid: %s\n", bleuuid);
     Serial.printf("└──────────────────────────────────\n");
 
     if (connect->validateStatusWIFI()) {
@@ -213,6 +221,8 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
         doc["z"] = z;
         doc["batteryLevel"] = batteryLevel;
         doc["timeActivity"] = timeActivity;
+        doc["frameType"] = frameType;
+        doc["BLEuuid"] = bleuuid;
 
         serializeJson(doc, json);
         Serial.printf("\n┌──────────────────────────────────\n");
@@ -270,7 +280,7 @@ void Distributor::process()
                 postIn(users[i].getId(), mode, users[i].getTempo(), users[i].getMac(), 
                       users[i].getDeviceTypeUser(), users[i].getBatteryLevel(), 
                       users[i].getX(), users[i].getY(), users[i].getZ(), 
-                      users[i].getTimeActivity());
+                      users[i].getTimeActivity(), users[i].getFrameType(), users[i].getBleuuid());
                 delay(100);
             }
         }
@@ -310,4 +320,4 @@ void Distributor::process()
             }
         }
     }
-} 
+}

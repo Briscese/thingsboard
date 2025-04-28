@@ -9,9 +9,15 @@
 #include "esp_log.h"
 #include <BLEScan.h>
 #include <BLEDevice.h>
+#include <deque>
+#include <vector>
+#include <iostream>
 
 #define ENDIAN_CHANGE_U16(x) ((((x)&0xFF000000)>>24) + (((x)&0x00FF0000)>>8) + ((((x)&0xFF00)<<8) + (((x)&0xFF)<<24)))
 extern Distributor* distributor;
+
+std::vector<int> minewOffSet = {1, 2, 3, 4, 5, 6, 7, 8};
+std::vector<int> mokoOffSet = {5, 12, 13, 6, 7, 8, 9, 10, 11};
 
 float GetBattery(float batteryVoltage)
 {
@@ -50,7 +56,8 @@ float GetBattery(float batteryVoltage)
     return std::ceil(percentage);
 }
 
-float GetAccelerometer(uint8_t msb, uint8_t lsb) {
+float GetAccelerometer(uint8_t msb, uint8_t lsb) 
+{
     uint16_t rawData = (msb << 8) | lsb;
 
     int integerPart = (rawData >> 8) & 0xFF;
@@ -67,7 +74,17 @@ float GetAccelerometer(uint8_t msb, uint8_t lsb) {
     return result;
 }
 
-void Advertisements::processIBeacon() {
+String Advertisements::getMacAddress()
+{
+    std::string deviceStr = device.toString();
+    std::string macTemp = deviceStr.substr(deviceStr.find("Address: ")+21, 5);
+    macTemp = macTemp.substr(0,2) + macTemp.substr(3,2);
+    std::transform(macTemp.begin(), macTemp.end(), macTemp.begin(), ::toupper);
+    return macTemp.c_str();
+}
+
+void Advertisements::processIBeacon() 
+{
     if(!device.haveManufacturerData()) return;
 
     std::string manufacturerData = device.getManufacturerData();
@@ -99,128 +116,79 @@ void Advertisements::processIBeacon() {
     }
 }
 
-void Advertisements::processTelemetry() {
+void Advertisements::processData()
+{
     if(!device.haveServiceData()) return;
 
     std::string serviceData = device.getServiceData();
     uint8_t data[100];
     serviceData.copy((char*)data, serviceData.length(), 0);
     
-    if (device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFEAA))) {
-        Serial.printf("\n📦 Raw Data: ");
-        for (size_t i = 0; i < serviceData.length(); i++) {
-            Serial.printf("%02X ", data[i]);   
-        }
-        Serial.println();
-        
-        Serial.printf("🔍 Device: %s\n", device.toString().c_str());
-        Serial.printf("📶 RSSI: %d dBm\n", device.getRSSI());
-        
-        if (data[0] == 0x20) {
-            uint8_t version = data[1];
-            uint16_t batteryVoltage = (data[2] << 8) | data[3];
-            int16_t temperature = (data[4] << 8) | data[5];
-            uint32_t packetCount = (data[6] << 24) | (data[7] << 16) | (data[8] << 8) | data[9];
-            uint32_t uptime = (data[10] << 24) | (data[11] << 16) | (data[12] << 8) | data[13];
-            
-            Serial.printf("\n📊 Telemetry:\n");
-            Serial.printf("📱 Version: %d\n", version);
-            Serial.printf("🔋 Battery: %.2fV (%.1f%%)\n", (float)batteryVoltage / 1000, GetBattery((float)batteryVoltage / 1000));
-            Serial.printf("🌡️ Temperature: %.2f°C\n", temperature / 256.0);
-            Serial.printf("📝 Packets: %u\n", packetCount);
-            Serial.printf("⏱️ Active Time: %.1f days\n", (uptime / 10.0) / 86400);
-            Serial.println();
-            
-            batteryLevel = GetBattery((float)batteryVoltage / 1000);
-            timeActivity = (uptime / 10.0) / 86400;
-        }
+    Serial.printf("\n📦 Raw Data: ");
+    for (size_t i = 0; i < serviceData.length(); i++) {
+        Serial.printf("%02X ", data[i]);   
+    }
+    Serial.printf("\n📶 RSSI: %d dBm\n", device.getRSSI());
+
+    if(device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFEAA))){
+        if(data[0] == 0x20)
+            processTelemetry(data);
+    }else if(device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFFE1))){
+        if(data[0] == 0xA1)
+            processAccelerometer(data, minewOffSet);
+    }else if(device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFEAB))){
+        if(data[0] == 0x60)
+            processAccelerometer(data, mokoOffSet);
+    }else{
+        Serial.printf("Unknown data format\n");
     }
 }
 
-void Advertisements::processAccelerometerMinew() {
-    if(!device.haveServiceData()) return;
-
-    std::string deviceStr = device.toString();
-    std::string macTemp = deviceStr.substr(deviceStr.find("Address: ")+21, 5);
-    macTemp = macTemp.substr(0,2) + macTemp.substr(3,2);
-    std::transform(macTemp.begin(), macTemp.end(), macTemp.begin(), ::toupper);
-
-    std::string serviceData = device.getServiceData();
-    uint8_t data[100];
-    serviceData.copy((char*)data, serviceData.length(), 0);
+void Advertisements::processTelemetry(uint8_t *data) 
+{
+    Serial.printf("\n🔍 Device: %s\n", device.toString().c_str());
+    uint8_t version = data[1];
+    uint16_t batteryVoltage = (data[2] << 8) | data[3];
+    int16_t temperature = (data[4] << 8) | data[5];
+    uint32_t packetCount = (data[6] << 24) | (data[7] << 16) | (data[8] << 8) | data[9];
+    uint32_t uptime = (data[10] << 24) | (data[11] << 16) | (data[12] << 8) | data[13];
     
-    if (data[0] == 0xA1 && device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFFE1))) {
-        Serial.printf("\n📦 Raw Data: ");
-        for (size_t i = 0; i < serviceData.length(); i++) {
-            Serial.printf("%02X ", data[i]);   
-        }
-        Serial.println();
-        
-        Serial.printf("🔍 Minew Device: %s\n", device.toString().c_str());
-        Serial.printf("📶 RSSI: %d dBm\n", device.getRSSI());
-        
-        uint8_t version = data[1];
-        batteryLevel = data[2];
-        x = GetAccelerometer(data[3], data[4]);
-        y = GetAccelerometer(data[5], data[6]);
-        z = GetAccelerometer(data[7], data[8]);
-        
-        Serial.printf("\n📱 Version: %d\n", version);
-        Serial.printf("🔋 Battery: %d%%\n", batteryLevel);
-        Serial.printf("🎯 Accelerometer:\n");
-        Serial.printf("  ➡️ X: %.2f\n", x);
-        Serial.printf("  ⬆️ Y: %.2f\n", y);
-        Serial.printf("  ↗️ Z: %.2f\n", z);
-        Serial.println();
-        
-        deviceType = 4;
-        deviceCode = macTemp;
-        if (distributor != nullptr)
-            distributor->UserRegisterData(macAddress.c_str(), deviceCode.c_str(), rssi, deviceType, batteryLevel, x, y, z, timeActivity);
-    }
-} 
-
-void Advertisements::processAccelerometerMoko(){
-    if(!device.haveServiceData()) return;
-
-    std::string deviceStr = device.toString();
-    std::string macTemp = deviceStr.substr(deviceStr.find("Address: ")+21, 5);
-    macTemp = macTemp.substr(0,2) + macTemp.substr(3,2);
-    std::transform(macTemp.begin(), macTemp.end(), macTemp.begin(), ::toupper);
-
-    std::string serviceData = device.getServiceData();
-    uint8_t data[100];
-    serviceData.copy((char*)data, serviceData.length(), 0);
+    Serial.printf("\n📊 Telemetry:\n");
+    Serial.printf("📱 Version: %d\n", version);
+    Serial.printf("🔋 Battery: %.2fV (%.1f%%)\n", (float)batteryVoltage / 1000, GetBattery((float)batteryVoltage / 1000));
+    Serial.printf("🌡️ Temperature: %.2f°C\n", temperature / 256.0);
+    Serial.printf("📝 Packets: %u\n", packetCount);
+    Serial.printf("⏱️ Active Time: %.1f days\n", (uptime / 10.0) / 86400);
+    Serial.println();
     
-    if (data[0] == 0x60 && device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFEAB))) {
-        Serial.printf("\n📦 Raw Data: ");
-        for (size_t i = 0; i < serviceData.length(); i++) {
-            Serial.printf("%02X ", data[i]);   
-        }
-        Serial.println();
-        
-        Serial.printf("🔍 Moko Device: %s\n", device.toString().c_str());
-        Serial.printf("📶 RSSI: %d dBm\n", device.getRSSI());
-        
-        uint8_t version = data[5];
-        batteryLevel = data[12] << 8 | data[13];
-        x = GetAccelerometer(data[6], data[7]);
-        y = GetAccelerometer(data[8], data[9]);
-        z = GetAccelerometer(data[10], data[11]);
-        
-        Serial.printf("\n📱 Version: %d\n", version);
-        Serial.printf("🔋 Battery: %d%%\n", batteryLevel);
-        Serial.printf("🎯 Accelerometer:\n");
-        Serial.printf("  ➡️ X: %.2f\n", x);
-        Serial.printf("  ⬆️ Y: %.2f\n", y);
-        Serial.printf("  ↗️ Z: %.2f\n", z);
-        Serial.println();
-        
-        deviceType = 4;
-        deviceCode = macTemp;
-        if (distributor != nullptr)
-            distributor->UserRegisterData(macAddress.c_str(), deviceCode.c_str(), rssi, deviceType, batteryLevel, x, y, z, timeActivity);
-    }
+    batteryLevel = GetBattery((float)batteryVoltage / 1000);
+    timeActivity = (uptime / 10.0) / 86400;
+}
+
+void Advertisements::processAccelerometer(uint8_t *data, std::vector<int> offset) 
+{
+    Serial.printf("🔍 Minew Device: %s\n", device.toString().c_str());
+    
+    uint8_t version = data[offset[0]];
+    batteryLevel = data[offset[1]];
+    x = GetAccelerometer(data[offset[2]], data[offset[3]]);
+    y = GetAccelerometer(data[offset[4]], data[offset[5]]);
+    z = GetAccelerometer(data[offset[6]], data[offset[7]]);
+    
+    Serial.printf("\n📱 Version: %d\n", version);
+    Serial.printf("🔋 Battery: %d%%\n", batteryLevel);
+    Serial.printf("🎯 Accelerometer:\n");
+    Serial.printf("  ➡️ X: %.2f\n", x);
+    Serial.printf("  ⬆️ Y: %.2f\n", y);
+    Serial.printf("  ↗️ Z: %.2f\n", z);
+    Serial.println();
+    
+    deviceType = 4;
+    deviceCode = getMacAddress().c_str();
+    frameType = data[0];
+    bleuuid = device.getServiceDataUUID().toString().c_str();
+    if (distributor != nullptr)
+        distributor->UserRegisterData(macAddress.c_str(), deviceCode.c_str(), rssi, deviceType, batteryLevel, x, y, z, timeActivity, frameType, bleuuid);
 }
 
 void Advertisements::ListDevices(BLEScanResults foundDevices)
@@ -240,9 +208,6 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
         setPayload(advertisedDevice.getPayload(), advertisedDevice.getPayloadLength());
         setRssi(advertisedDevice.getRSSI());
 
-        processIBeacon();
-        processTelemetry();
-        processAccelerometerMinew();
-        processAccelerometerMoko();
+        processData();
     }
 }
