@@ -285,7 +285,7 @@ void Distributor::process()
                 postIn(users[i].getId(), mode, users[i].getTempo(), users[i].getMac(), 
                       users[i].getDeviceTypeUser(), users[i].getBatteryLevel(), 
                       users[i].getX(), users[i].getY(), users[i].getZ(), 
-                      users[i].getTimeActivity(), users[i].getFrameType(), users[i].getBleuuid(), users[i].getName());
+                      users[i].getTimeActivity(), users[i].getFrameType(), users[i].getBleuuid(), (users[i].getName() + i));
                 delay(100);
             }
         }
