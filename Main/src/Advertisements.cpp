@@ -187,8 +187,9 @@ void Advertisements::processAccelerometer(uint8_t *data, std::vector<int> offset
     deviceCode = getMacAddress().c_str();
     frameType = data[0];
     bleuuid = device.getServiceDataUUID().toString().c_str();
+    name = device.getName().c_str();
     if (distributor != nullptr)
-        distributor->UserRegisterData(macAddress.c_str(), deviceCode.c_str(), rssi, deviceType, batteryLevel, x, y, z, timeActivity, frameType, bleuuid);
+        distributor->UserRegisterData(macAddress.c_str(), deviceCode.c_str(), rssi, deviceType, batteryLevel, x, y, z, timeActivity, frameType, bleuuid, name);
 }
 
 void Advertisements::ListDevices(BLEScanResults foundDevices)

@@ -127,10 +127,11 @@ int Distributor::findUser(const String& id) {
 
 void Distributor::UserRegisterData(const std::string& macAddress, const std::string& code, int rssiBLE, 
                                    int deviceType, int batterylevel, float x, float y, float z, 
-                                   float timeActivity, String frameType, const std::string& bleuuid) {
+                                   float timeActivity, String frameType, const std::string& bleuuid, String name) {
     if (users.empty()) {
         User firstUser;
         firstUser.setId(code.c_str());
+        firstUser.setName(name.c_str());
         firstUser.setBatteryLevel(batterylevel);
         firstUser.setX(x);
         firstUser.setY(y);
@@ -149,6 +150,7 @@ void Distributor::UserRegisterData(const std::string& macAddress, const std::str
             if(users[foundUser].getBatteryLevel() == 0 && batterylevel > 0) {
                 users[foundUser].setBatteryLevel(batterylevel);
             }
+            users[foundUser].setName(name.c_str());
             users[foundUser].setX(x);
             users[foundUser].setY(y);
             users[foundUser].setZ(z);
@@ -160,6 +162,7 @@ void Distributor::UserRegisterData(const std::string& macAddress, const std::str
         } else {
             User newUser;
             newUser.setId(code.c_str());
+            newUser.setName(name.c_str());
             newUser.setBatteryLevel(batterylevel);
             newUser.setX(x);
             newUser.setY(y);
@@ -178,10 +181,11 @@ void Distributor::UserRegisterData(const std::string& macAddress, const std::str
 
 void Distributor::postIn(String userId, int media, String tempo, String mac, 
                     int deviceType, int batteryLevel, float x, float y, float z, 
-                    float timeActivity, String frameType, String bleuuid) {
+                    float timeActivity, String frameType, String bleuuid, String name) {
     Serial.printf("\n📡 POST to API - Device %s:\n", mac);
     Serial.printf("┌──────────────────────────────────\n");
     Serial.printf("│ 👤 User: %s\n", userId);
+    Serial.printf("│ 📡 Device: %s\n", name);
     Serial.printf("│ 📊 RSSI Average: %d\n", media);
     Serial.printf("│ ⏰ Time: %s\n", tempo);
     Serial.printf("│ 📱 MAC: %s\n", mac);
@@ -223,6 +227,7 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
         doc["timeActivity"] = timeActivity;
         doc["frameType"] = frameType;
         doc["BLEuuid"] = bleuuid;
+        doc["name"] = name;
 
         serializeJson(doc, json);
         Serial.printf("\n┌──────────────────────────────────\n");
@@ -280,7 +285,7 @@ void Distributor::process()
                 postIn(users[i].getId(), mode, users[i].getTempo(), users[i].getMac(), 
                       users[i].getDeviceTypeUser(), users[i].getBatteryLevel(), 
                       users[i].getX(), users[i].getY(), users[i].getZ(), 
-                      users[i].getTimeActivity(), users[i].getFrameType(), users[i].getBleuuid());
+                      users[i].getTimeActivity(), users[i].getFrameType(), users[i].getBleuuid(), users[i].getName());
                 delay(100);
             }
         }

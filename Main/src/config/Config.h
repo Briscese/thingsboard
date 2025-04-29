@@ -6,8 +6,8 @@
 //*Aqui você deve alterar as configurações do WIFI para rodar de acordo com sua rede
 
 // Configurações de WiFi
-const char* WIFI_SSID = "pointservice";
-const char* WIFI_PASSWORD = "HGgs@250";
+const char* WIFI_SSID = "CantinhodaBELEZASUPERIOR";
+const char* WIFI_PASSWORD = "05012715";
 const char* WIFI_SSID_ALTERNATIVE = "FAB&ITO1";
 const char* WIFI_PASSWORD_ALTERNATIVE = "CidadeInteligente";
 

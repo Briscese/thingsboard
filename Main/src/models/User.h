@@ -8,6 +8,7 @@
 class User {
 private:
     String id;
+    String name;
     std::vector<int> mediasRssi;
     bool loggedIn;
     int batteryLevel;
@@ -30,6 +31,7 @@ public:
     
     // Getters existentes
     String getId() const { return id; }
+    String getName() const { return name; }
     const std::vector<int>& getMediasRssi() const { return mediasRssi; }
     bool isLoggedIn() const { return loggedIn; }
     int getBatteryLevel() const { return batteryLevel; }
@@ -47,6 +49,7 @@ public:
 
     // Setters existentes
     void setId(const String& value) { id = value; }
+    void setName(String value) { name = value; }
     void addMediaRssi(int value) { mediasRssi.push_back(value); }
     void clearMediasRssi() { mediasRssi.clear(); }
     void setLoggedIn(bool value) { loggedIn = value; }

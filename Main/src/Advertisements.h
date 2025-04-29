@@ -12,6 +12,7 @@
 class Advertisements {
 private:
     BLEAdvertisedDevice device;
+    String name;
     std::string macAddress;
     uint8_t* payload;
     size_t payloadLength;
@@ -31,6 +32,7 @@ private:
 public:
     Advertisements() {
         payload = nullptr;
+        name="";
         payloadLength = 0;
         rssi = 0;
         batteryLevel = 0;
@@ -47,6 +49,7 @@ public:
 
     // Setters
     void setDevice(BLEAdvertisedDevice dev) { device = dev; }
+    void setName(String n) { name = n; }
     void setMacAddress(const std::string& mac) { macAddress = mac; }
     void setPayload(uint8_t* pl, size_t length) { 
         payload = pl; 
@@ -69,6 +72,7 @@ public:
 
     // Getters
     std::string getMacAddress() const { return macAddress; }
+    String getName () const { return name; }
     uint8_t* getPayload() const { return payload; }
     size_t getPayloadLength() const { return payloadLength; }
     int getRssi() const { return rssi; }
