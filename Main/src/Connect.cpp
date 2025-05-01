@@ -293,7 +293,7 @@ void Connect::getOn(String s) {
             String output;
             doc["code"] = s;
             doc["rssi"] = wifiRssi;
-            doc["version"] = "11.0.0.0v-point-pqtech-beta0015082024.bin";
+            doc["version"] = "12.0.0.0v-point-service-0000030042025.bin";
          
             serializeJson(doc, output);
             
