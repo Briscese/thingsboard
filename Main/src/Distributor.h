@@ -28,11 +28,10 @@ public:
     int findUser(const String& id);
     void UserRegisterData(const std::string& macAddress, const std::string& code, int rssiBLE, 
                          int deviceType, int batterylevel, float x, float y, float z, 
-                         float timeActivity, String frameType, const std::string& bleuuid,
-                         String Name);
+                         float timeActivity,  String name);
     void postIn(String userId, int media, String tempo, String mac, 
                int deviceType, int batteryLevel, float x, float y, float z, 
-               float timeActivity, String frameType, String bleuuid, String name);
+               float timeActivity, String name, int mode, double distance);
     
     bool isSending() const { return sending; }
     void setSending(bool value) { sending = value; }

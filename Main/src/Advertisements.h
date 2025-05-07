@@ -22,8 +22,6 @@ private:
     float y;
     float z;
     float timeActivity;
-    std::string bleuuid;
-    String frameType;
     int deviceType;
     std::string deviceCode;
     bool isTagPressed;
@@ -40,8 +38,6 @@ public:
         y = 0.0f;
         z = 0.0f;
         timeActivity = 0.0f;
-        bleuuid = "";
-        frameType = "";
         deviceType = 0;
         isTagPressed = false;
         isFindPressed = false;
@@ -63,8 +59,6 @@ public:
         z = zVal;
     }
     void setTimeActivity(float time) { timeActivity = time; }
-    void setFrameType(const String type) { frameType = type; }
-    void setBleuuid(const std::string& uuid) { bleuuid = uuid; }
     void setDeviceType(int type) { deviceType = type; }
     void setDeviceCode(const std::string& code) { deviceCode = code; }
     void setTagPressed(bool pressed) { isTagPressed = pressed; }
@@ -81,8 +75,6 @@ public:
     float getY() const { return y; }
     float getZ() const { return z; }
     float getTimeActivity() const { return timeActivity; }
-    String getFrameType() const {return frameType; }
-    std::string getBleuuid() const { return bleuuid; }
     int getDeviceType() const { return deviceType; }
     std::string getDeviceCode() const { return deviceCode; }
     bool getTagPressed() const { return isTagPressed; }

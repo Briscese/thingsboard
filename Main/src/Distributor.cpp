@@ -74,8 +74,7 @@ double CalculateDistance(double signalPower)
       break;
   }  
   double distance = pow(10, (A - signalPower) / (10 * n)) + B;
-  
-  Serial.printf("distance: %f\n", distance);
+
   return distance;
 }
 
@@ -100,7 +99,6 @@ int CalculateMode(const std::vector<int>& numbers) {
       }
     }
 
-    Serial.printf("Mode: %d\n", mostRepeated);
     return mostRepeated;
 }
 
@@ -128,7 +126,7 @@ int Distributor::findUser(const String& id) {
 
 void Distributor::UserRegisterData(const std::string& macAddress, const std::string& code, int rssiBLE, 
                                    int deviceType, int batterylevel, float x, float y, float z, 
-                                   float timeActivity, String frameType, const std::string& bleuuid, String) {
+                                   float timeActivity, String name) {
     if (users.empty()) {
         User firstUser;
         firstUser.setId(code.c_str());
@@ -139,8 +137,6 @@ void Distributor::UserRegisterData(const std::string& macAddress, const std::str
         firstUser.updateAnalog((rssiBLE * -1));
         firstUser.addMediaRssi(firstUser.getAnalog().getValue());
         firstUser.setMac(macAddress.c_str());
-        firstUser.setFrameType(frameType);
-        firstUser.setBleuuid(bleuuid.c_str());
         firstUser.setTimeActivity(timeActivity);
         firstUser.setDeviceTypeUser(deviceType);
         users.push_back(firstUser);
@@ -155,8 +151,6 @@ void Distributor::UserRegisterData(const std::string& macAddress, const std::str
             users[foundUser].setZ(z);
             users[foundUser].updateAnalog((rssiBLE * -1));
             users[foundUser].addMediaRssi(users[foundUser].getAnalog().getValue());
-            users[foundUser].setFrameType(frameType); // Ajustado para std::string
-            users[foundUser].setBleuuid(bleuuid.c_str());
             users[foundUser].setTimeActivity(timeActivity);
         } else {
             User newUser;
@@ -169,8 +163,6 @@ void Distributor::UserRegisterData(const std::string& macAddress, const std::str
             newUser.addMediaRssi(newUser.getAnalog().getValue());
             newUser.setMac(macAddress.c_str());
             newUser.setDeviceTypeUser(deviceType);
-            newUser.setFrameType(frameType); // Ajustado para std::string
-            newUser.setBleuuid(bleuuid.c_str());
             newUser.setTimeActivity(timeActivity);
             users.push_back(newUser);
         }
@@ -179,24 +171,25 @@ void Distributor::UserRegisterData(const std::string& macAddress, const std::str
 
 void Distributor::postIn(String userId, int media, String tempo, String mac, 
                     int deviceType, int batteryLevel, float x, float y, float z, 
-                    float timeActivity, String frameType, String bleuuid, String name) {
+                    float timeActivity, String name, int mode, double distance) {
     Serial.printf("\n📡 POST to API - Device %s:\n", mac);
     Serial.printf("┌──────────────────────────────────\n");
     Serial.printf("│ 👤 User: %s\n", userId);
+    Serial.printf("│ 📦 Name: %s\n", name);
     Serial.printf("│ 📊 RSSI Average: %d\n", media);
     Serial.printf("│ ⏰ Time: %s\n", tempo);
     Serial.printf("│ 📱 MAC: %s\n", mac);
     Serial.printf("│ 🔢 Type: %d\n", deviceType);
     Serial.printf("│ 🔋 Battery: %d%%\n", batteryLevel);
+    Serial.printf("│ ⏱️ Active Time: %.1f days\n", timeActivity);
+    Serial.printf("│ 📏 Distance: %.2f m\n", distance);
+    Serial.printf("│ 📡 Mode: %d\n", mode);
     if (deviceType == 4) {
         Serial.printf("│ 🎯 Accelerometer:\n");
         Serial.printf("│   ➡️ X: %.2f\n", x);
         Serial.printf("│   ⬆️ Y: %.2f\n", y);
         Serial.printf("│   ↗️ Z: %.2f\n", z);
     }
-    Serial.printf("│ ⏱️ Active Time: %.1f days\n", timeActivity);
-    Serial.printf("│    Frame Type: %d\n", frameType);
-    Serial.printf("│    BLEuuid: %s\n", bleuuid);
     Serial.printf("└──────────────────────────────────\n");
 
     if (connect->validateStatusWIFI()) {
@@ -222,9 +215,8 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
         doc["z"] = z;
         doc["batteryLevel"] = batteryLevel;
         doc["timeActivity"] = timeActivity;
-        doc["frameType"] = frameType;
-        doc["BLEuuid"] = bleuuid;
-
+        doc["Name"] = name;
+ 
         serializeJson(doc, json);
         Serial.printf("\n┌──────────────────────────────────\n");
         Serial.printf("│ 🌐 URL: %s/PostLocation\n", "http://brd-parque-it.pointservice.com.br/api/v1/IOT");
@@ -274,14 +266,14 @@ void Distributor::process()
             if (users[i].isLoggedIn())
             {
                 int mode = CalculateMode(users[i].getMediasRssi());
-                CalculateDistance(mode*-1);
+                double distance = CalculateDistance(mode*-1);
                 users[i].clearMediasRssi();
                 users[i].incrementVezes();
                 
                 postIn(users[i].getId(), mode, users[i].getTempo(), users[i].getMac(), 
                       users[i].getDeviceTypeUser(), users[i].getBatteryLevel(), 
                       users[i].getX(), users[i].getY(), users[i].getZ(), 
-                      users[i].getTimeActivity(), users[i].getFrameType(), users[i].getBleuuid(), users[i].getName());
+                      users[i].getTimeActivity(), users[i].getName(), mode, distance);
                 delay(100);
             }
         }
@@ -313,7 +305,7 @@ void Distributor::process()
             
             if (millis() - lastSpinnerUpdate > 100) {
                 char buffer[50];
-                sprintf(buffer, "[%c] Searching devices...", spinner[spinnerPos]);
+                sprintf(buffer, "%c", spinner[spinnerPos]);
                 Serial.print("\r");
                 Serial.print(buffer);
                 spinnerPos = (spinnerPos + 1) % 4;

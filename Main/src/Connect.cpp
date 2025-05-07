@@ -274,12 +274,12 @@ void Connect::loadErrorMode() {
             }
         }
         header = "";
-        client.stop();
+        client.stop();  
     }
 }
 
 void Connect::getOn(String s) {
-    if (millis() - lastSendTime > 1200000) {
+    if (millis() - lastSendTime > 12000) {
         Serial.println();
         Serial.print("Sent TURNON: ");
         Serial.println(s);

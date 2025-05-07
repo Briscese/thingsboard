@@ -11,8 +11,6 @@ User::User() :
     vezes(0),
     deviceTypeUser(0),
     timeActivity(0),
-    frameType(""),
-    bleuuid(""),
     analog(0, true, 0.8)
 {
 } 
