@@ -2,7 +2,7 @@
 
 Connect::Connect(const char* name, const char* password, 
                  const char* alternative_name, const char* alternative_password,
-                 const char* server_pwd, int wifi_limit, int max_error_mode)
+                 const char* server_pwd, int wifi_limit, int max_error_mode, String api_url)
     : server(80),
       timeClient(ntpUDP, "a.st1.ntp.br", -10800, 60000),
       NAME(name),
@@ -12,6 +12,7 @@ Connect::Connect(const char* name, const char* password,
       SERVER_PASSWORD(server_pwd),
       WIFI_LIMIT(wifi_limit),
       MAX_ERROR_MODE(max_error_mode),
+      API_URL(api_url),
       errorMode(false),
       sending(false),
       attempts(0),
@@ -297,7 +298,7 @@ void Connect::getOn(String s) {
          
             serializeJson(doc, output);
             
-            if (http.begin(("http://brd-parque-it.pointservice.com.br/api/v1/IOT/TurnOn"))) {
+            if (http.begin(API_URL + "/PostLocation")) {
                 http.addHeader("Content-Type", "application/json");
                 http.setTimeout(15000);
                 

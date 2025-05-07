@@ -13,7 +13,7 @@ const char* WIFI_PASSWORD_ALTERNATIVE = "CidadeInteligente";
 
 // Configurações do Servidor
 const char* SERVER_PASSWORD = "ErrorLogServer123";
-const char* API_URL = "http://brd-parque-it.pointservice.com.br/api/v1/IOT";
+const String API_URL = "http://brd-parque-it.pointservice.com.br/api/v1/IOT";
 
 // Configurações do Dispositivo
 const char* DEVICE_ID = "FAB_SJC_CE1_T_0007";

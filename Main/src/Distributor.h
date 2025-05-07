@@ -18,11 +18,12 @@ private:
     Advertisements* advertisements;
     HTTPClient http;
     String _id;
+    String API_URL;
 
     void loggedIn(int pos);
 
 public:
-    Distributor(std::vector<User>& users, BLEScan* pBLEScan);
+    Distributor(std::vector<User>& users, BLEScan* pBLEScan, String api_url);
     void process();
     int findUser(const String& id);
     void UserRegisterData(const std::string& macAddress, const std::string& code, int rssiBLE, 

@@ -19,6 +19,18 @@ extern Distributor* distributor;
 std::vector<int> minewOffSet = {1, 2, 3, 4, 5, 6, 7, 8};
 std::vector<int> mokoOffSet = {5, 12, 13, 6, 7, 8, 9, 10, 11};
 
+struct mapData {
+    uint16_t uuid;
+    uint8_t type;
+    std::vector<int> offset;
+};
+
+std::vector<mapData> list = {
+    {0xFEAA, 0x20, {}},
+    {0xFFE1, 0xA1, minewOffSet},
+    {0xFEAB, 0x60, mokoOffSet}
+};
+
 float GetBattery(float batteryVoltage)
 {
     float percentage = 0;
@@ -130,17 +142,15 @@ void Advertisements::processData()
     }
     Serial.printf("\n📶 RSSI: %d dBm\n", device.getRSSI());
 
-    if(device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFEAA))){
-        if(data[0] == 0x20)
-            processTelemetry(data);
-    }else if(device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFFE1))){
-        if(data[0] == 0xA1)
-            processAccelerometer(data, minewOffSet);
-    }else if(device.getServiceDataUUID().equals(BLEUUID((uint16_t)0xFEAB))){
-        if(data[0] == 0x60)
-            processAccelerometer(data, mokoOffSet);
-    }else{
-        Serial.printf("Unknown data format\n");
+    for (mapData item : list) {
+        if (device.getServiceDataUUID().equals(BLEUUID((uint16_t)item.uuid))) {
+            if (data[0] == item.type) {
+                if(item.offset.empty())
+                    processTelemetry(data);
+                else
+                    processAccelerometer(data, item.offset);
+            }
+        }
     }
 }
 

@@ -8,14 +8,15 @@ extern Connect* connect;
 const int SCAN_INTERVAL = 3000;
 const int TIME_MEDIA = 100000;
 
-Distributor::Distributor(std::vector<User>& users, BLEScan* pBLEScan) 
+Distributor::Distributor(std::vector<User>& users, BLEScan* pBLEScan, String api_url) 
     : users(users),
       sending(false),
       inicioMedia(0),
       lastScanTime(0),
       lastSendTime(0),
       pBLEScan(pBLEScan),
-      advertisements(new Advertisements())
+      advertisements(new Advertisements()),
+      API_URL(api_url)
 {
 }
 
@@ -127,11 +128,10 @@ int Distributor::findUser(const String& id) {
 
 void Distributor::UserRegisterData(const std::string& macAddress, const std::string& code, int rssiBLE, 
                                    int deviceType, int batterylevel, float x, float y, float z, 
-                                   float timeActivity, String frameType, const std::string& bleuuid, String name) {
+                                   float timeActivity, String frameType, const std::string& bleuuid, String) {
     if (users.empty()) {
         User firstUser;
         firstUser.setId(code.c_str());
-        firstUser.setName(name.c_str());
         firstUser.setBatteryLevel(batterylevel);
         firstUser.setX(x);
         firstUser.setY(y);
@@ -150,19 +150,17 @@ void Distributor::UserRegisterData(const std::string& macAddress, const std::str
             if(users[foundUser].getBatteryLevel() == 0 && batterylevel > 0) {
                 users[foundUser].setBatteryLevel(batterylevel);
             }
-            users[foundUser].setName(name.c_str());
             users[foundUser].setX(x);
             users[foundUser].setY(y);
             users[foundUser].setZ(z);
             users[foundUser].updateAnalog((rssiBLE * -1));
             users[foundUser].addMediaRssi(users[foundUser].getAnalog().getValue());
-            users[foundUser].setFrameType(frameType);
+            users[foundUser].setFrameType(frameType); // Ajustado para std::string
             users[foundUser].setBleuuid(bleuuid.c_str());
             users[foundUser].setTimeActivity(timeActivity);
         } else {
             User newUser;
             newUser.setId(code.c_str());
-            newUser.setName(name.c_str());
             newUser.setBatteryLevel(batterylevel);
             newUser.setX(x);
             newUser.setY(y);
@@ -171,7 +169,7 @@ void Distributor::UserRegisterData(const std::string& macAddress, const std::str
             newUser.addMediaRssi(newUser.getAnalog().getValue());
             newUser.setMac(macAddress.c_str());
             newUser.setDeviceTypeUser(deviceType);
-            newUser.setFrameType(frameType);
+            newUser.setFrameType(frameType); // Ajustado para std::string
             newUser.setBleuuid(bleuuid.c_str());
             newUser.setTimeActivity(timeActivity);
             users.push_back(newUser);
@@ -185,7 +183,6 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
     Serial.printf("\n📡 POST to API - Device %s:\n", mac);
     Serial.printf("┌──────────────────────────────────\n");
     Serial.printf("│ 👤 User: %s\n", userId);
-    Serial.printf("│ 📡 Device: %s\n", name);
     Serial.printf("│ 📊 RSSI Average: %d\n", media);
     Serial.printf("│ ⏰ Time: %s\n", tempo);
     Serial.printf("│ 📱 MAC: %s\n", mac);
@@ -198,7 +195,7 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
         Serial.printf("│   ↗️ Z: %.2f\n", z);
     }
     Serial.printf("│ ⏱️ Active Time: %.1f days\n", timeActivity);
-    Serial.printf("│    Frame Type: %s\n", frameType);
+    Serial.printf("│    Frame Type: %d\n", frameType);
     Serial.printf("│    BLEuuid: %s\n", bleuuid);
     Serial.printf("└──────────────────────────────────\n");
 
@@ -227,7 +224,6 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
         doc["timeActivity"] = timeActivity;
         doc["frameType"] = frameType;
         doc["BLEuuid"] = bleuuid;
-        doc["name"] = name;
 
         serializeJson(doc, json);
         Serial.printf("\n┌──────────────────────────────────\n");
@@ -285,7 +281,7 @@ void Distributor::process()
                 postIn(users[i].getId(), mode, users[i].getTempo(), users[i].getMac(), 
                       users[i].getDeviceTypeUser(), users[i].getBatteryLevel(), 
                       users[i].getX(), users[i].getY(), users[i].getZ(), 
-                      users[i].getTimeActivity(), users[i].getFrameType(), users[i].getBleuuid(), (users[i].getName() + i));
+                      users[i].getTimeActivity(), users[i].getFrameType(), users[i].getBleuuid(), users[i].getName());
                 delay(100);
             }
         }

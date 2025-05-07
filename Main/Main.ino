@@ -28,7 +28,8 @@ void setup() {
         WIFI_PASSWORD_ALTERNATIVE,
         SERVER_PASSWORD,
         WIFI_SIGNAL_LIMIT,
-        MAX_ERROR_MODE
+        MAX_ERROR_MODE,
+        API_URL
     );
 
     if(connect->validateStatusWIFI()) {
@@ -50,7 +51,7 @@ void setup() {
     pAdvertising->setMinPreferred(0x06);
     pAdvertising->setMinPreferred(0x12);
     BLEDevice::startAdvertising();
-    distributor = new Distributor(User::getAllUsers(), pBLEScan);
+    distributor = new Distributor(User::getAllUsers(), pBLEScan, API_URL);
   }
 }
 

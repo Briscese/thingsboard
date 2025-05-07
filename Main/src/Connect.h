@@ -15,7 +15,7 @@ class Connect {
 public:
     Connect(const char* name, const char* password, 
             const char* alternative_name, const char* alternative_password,
-            const char* server_pwd, int wifi_limit, int max_error_mode);
+            const char* server_pwd, int wifi_limit, int max_error_mode, const String api_url);
     
     void activeSoftAP();
     void updatePreferences();
@@ -42,6 +42,7 @@ private:
     const char* SERVER_PASSWORD;
     const int WIFI_LIMIT;
     const int MAX_ERROR_MODE;
+    const String API_URL;
     
     bool errorMode;
     bool sending;
