@@ -298,7 +298,7 @@ void Connect::getOn(String s) {
          
             serializeJson(doc, output);
             
-            if (http.begin(API_URL + "/PostLocation")) {
+            if (http.begin(API_URL + "/TurnOn")) {
                 http.addHeader("Content-Type", "application/json");
                 http.setTimeout(15000);
                 
