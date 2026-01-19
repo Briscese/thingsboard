@@ -10,12 +10,14 @@
 #include <WiFiUdp.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <PubSubClient.h>
 
 class Connect {
 public:
     Connect(const char* name, const char* password, 
             const char* alternative_name, const char* alternative_password,
-            const char* server_pwd, int wifi_limit, int max_error_mode, const String api_url);
+            const char* server_pwd, int wifi_limit, int max_error_mode, const String api_url,
+            const char* mqtt_server, int mqtt_port, const char* mqtt_token, const char* mqtt_topic);
     
     void activeSoftAP();
     void updatePreferences();
@@ -27,6 +29,12 @@ public:
     String getSendId() const { return sendId; }
     bool isErrorMode() const { return errorMode; }
     bool isSending() const { return sending; }
+    
+    // Métodos MQTT
+    bool connectMQTT();
+    bool publishTelemetry(const String& jsonData);
+    bool isMQTTConnected();
+    void loopMQTT();
 
 private:
     WiFiServer server;
@@ -34,6 +42,8 @@ private:
     NTPClient timeClient;
     HTTPClient http;
     Preferences preferences;
+    WiFiClient wifiClient;
+    PubSubClient mqttClient;
     
     const char* NAME;
     const char* PASSWORD;
@@ -43,6 +53,12 @@ private:
     const int WIFI_LIMIT;
     const int MAX_ERROR_MODE;
     const String API_URL;
+    
+    // Configurações MQTT
+    const char* MQTT_SERVER;
+    const int MQTT_PORT;
+    const char* MQTT_TOKEN;
+    const char* MQTT_TOPIC;
     
     bool errorMode;
     bool sending;

@@ -32,6 +32,7 @@ public:
     void postIn(String userId, int media, String tempo, String mac, 
                int deviceType, int batteryLevel, float x, float y, float z, 
                float timeActivity, String name, int mode, double distance);
+    void sendDataToThingsBoard(User& user);  // Novo método para MQTT
     
     bool isSending() const { return sending; }
     void setSending(bool value) { sending = value; }

@@ -29,11 +29,18 @@ void setup() {
         SERVER_PASSWORD,
         WIFI_SIGNAL_LIMIT,
         MAX_ERROR_MODE,
-        API_URL
+        API_URL,
+        MQTT_SERVER,
+        MQTT_PORT,
+        MQTT_TOKEN,
+        MQTT_TOPIC
     );
 
     if(connect->validateStatusWIFI()) {
         connect->getOn(DEVICE_ID);
+        
+        // Conectar ao MQTT ThingsBoard
+        connect->connectMQTT();
 
     esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
     esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
@@ -56,6 +63,28 @@ void setup() {
 }
 
 void loop() {
+    // Manter conexão MQTT ativa
+    connect->loopMQTT();
+    
+    // HEARTBEAT: Enviar sinal de vida a cada 15 segundos (garante que está funcionando)
+    static unsigned long lastHeartbeat = 0;
+    if (millis() - lastHeartbeat > 15000) {
+        DynamicJsonDocument doc(256);
+        doc["deviceId"] = DEVICE_ID;
+        doc["uptime"] = millis();
+        doc["wifiRSSI"] = WiFi.RSSI();
+        doc["status"] = "online";
+        
+        String jsonData;
+        serializeJson(doc, jsonData);
+        
+        Serial.println("💓 Enviando heartbeat: " + jsonData);
+        if (connect->publishTelemetry(jsonData)) {
+            Serial.println("✓ Heartbeat enviado!");
+        }
+        lastHeartbeat = millis();
+    }
+    
     if (connect->isErrorMode()) {
         connect->loadErrorMode();
     } else {

@@ -285,14 +285,25 @@ void Distributor::process()
     else if (millis() - lastScanTime > SCAN_INTERVAL && BLEDevice::getInitialized() == true && !sending) 
     { 
         Serial.printf("\nTIME to ACTIVE: %d\n", millis() - lastSendTime);
-        Serial.println("\nSCAN BLE...");
+        Serial.println("\nTESTE 2: START scan + ListDevices (processando dados)");
         
-        if (advertisements != nullptr) {
-            BLEScanResults foundDevices = pBLEScan->start(3);
-            advertisements->ListDevices(foundDevices);
-            pBLEScan->clearResults();
-            lastScanTime = millis();
+        if (advertisements != nullptr && BLEDevice::getInitialized() == true) {
+          Serial.println("🔵 Iniciando BLE scan...");
+          BLEScanResults* foundDevices = pBLEScan->start(3, false);
+          Serial.printf("🔵 Scan completo! Encontrados: %d dispositivos\n", foundDevices ? foundDevices->getCount() : 0);
+          
+          if (foundDevices != nullptr) {
+            Serial.println("🟡 Processando dispositivos com ListDevices()...");
+            advertisements->ListDevices(*foundDevices);
+            Serial.println("✅ ListDevices() completou com sucesso!");
+            
+            // Agora limpa os resultados
+            // Serial.println("🟡 Limpando resultados com clearResults()...");
+            // pBLeScan->clearResults();
+            // Serial.println("✅ clearResults() completo!");
+          }
         }
+        lastScanTime = millis();
     }
     else
     {
@@ -312,5 +323,41 @@ void Distributor::process()
                 lastSpinnerUpdate = millis();
             }
         }
+    }
+}
+
+// Novo método para enviar dados via MQTT para ThingsBoard
+void Distributor::sendDataToThingsBoard(User& user) {
+    if (connect == nullptr) {
+        Serial.println("Erro: Connect não inicializado");
+        return;
+    }
+    
+    // Criar JSON com os dados do usuário
+    const size_t capacity = JSON_OBJECT_SIZE(12) + 200;
+    DynamicJsonDocument doc(capacity);
+    
+    doc["deviceId"] = user.getId();
+    doc["mac"] = user.getMac();
+    doc["rssi"] = user.getAnalog().getValue();
+    doc["battery"] = user.getBatteryLevel();
+    doc["distance"] = CalculateDistance(user.getAnalog().getValue());
+    doc["x"] = user.getX();
+    doc["y"] = user.getY();
+    doc["z"] = user.getZ();
+    doc["timeActivity"] = user.getTimeActivity();
+    doc["deviceType"] = user.getDeviceTypeUser();
+    doc["loggedIn"] = user.isLoggedIn();
+    doc["timestamp"] = millis();
+    
+    String jsonString;
+    serializeJson(doc, jsonString);
+    
+    // Enviar via MQTT
+    if (connect->publishTelemetry(jsonString)) {
+        Serial.println("✓ Dados enviados ao ThingsBoard via MQTT");
+        Serial.println("  Payload: " + jsonString);
+    } else {
+        Serial.println("✗ Falha ao enviar dados ao ThingsBoard");
     }
 }

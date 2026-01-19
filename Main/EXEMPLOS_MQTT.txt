@@ -1,0 +1,244 @@
+═══════════════════════════════════════════════════════════════
+   EXEMPLOS DE USO MQTT - APENAS REFERÊNCIA (NÃO COMPILAR)
+═══════════════════════════════════════════════════════════════
+
+// ============================================================
+// EXEMPLO 1: Envio simples no loop() principal
+// ============================================================
+
+void loop() {
+    connect->loopMQTT();  // JÁ ADICIONADO!
+    
+    if (connect->isErrorMode()) {
+        connect->loadErrorMode();
+    } else {
+        if(connect->validateStatusWIFI()) {
+            if (distributor != nullptr) {
+                distributor->process();
+            }
+            connect->getOn(DEVICE_ID);
+            
+            // ADICIONE: Enviar dados a cada 10 segundos
+            static unsigned long lastSend = 0;
+            if (millis() - lastSend > 10000) {
+                String telemetry = "{\"status\":\"online\",\"uptime\":" + String(millis()) + "}";
+                connect->publishTelemetry(telemetry);
+                lastSend = millis();
+            }
+        }
+    }
+}
+
+// ============================================================
+// EXEMPLO 2: Modificar Distributor::process() para enviar dados
+// ============================================================
+
+// No final do método process() em Distributor.cpp:
+
+void Distributor::process() {
+    // ... seu código existente de scan BLE ...
+    
+    // ADICIONE ao final do método:
+    
+    // Enviar dados dos usuários logados via MQTT a cada 30 segundos
+    static unsigned long lastMqttBatch = 0;
+    if (millis() - lastMqttBatch > 30000) {
+        Serial.println("\n=== Enviando dados para ThingsBoard ===");
+        
+        int enviados = 0;
+        for (size_t i = 0; i < users.size(); i++) {
+            if (users[i].isLoggedIn()) {
+                sendDataToThingsBoard(users[i]);
+                enviados++;
+                delay(100); // Pequeno delay entre envios
+            }
+        }
+        
+        Serial.printf("Total de usuários enviados: %d\n", enviados);
+        lastMqttBatch = millis();
+    }
+}
+
+// ============================================================
+// EXEMPLO 3: Teste rápido no loop()
+// ============================================================
+
+// Adicione no loop() para testar rapidamente:
+
+static unsigned long teste = 0;
+if (millis() - teste > 10000) {
+    String msg = "{\"temperature\":" + String(random(20,30)) + ",\"humidity\":" + String(random(40,70)) + "}";
+    if (connect->publishTelemetry(msg)) {
+        Serial.println("✓ Teste MQTT enviado!");
+    }
+    teste = millis();
+}
+
+// ============================================================
+// EXEMPLO 4: Enviar quando detectar novo usuário BLE
+// ============================================================
+
+// Em UserRegisterData(), quando registrar um novo usuário:
+
+if (users.empty()) {
+    User firstUser;
+    // ... configuração do usuário ...
+    users.push_back(firstUser);
+    
+    // Notificar ThingsBoard sobre novo dispositivo detectado
+    String notification = "{\"event\":\"new_device\",\"deviceId\":\"" + 
+                         String(code.c_str()) + "\",\"rssi\":" + String(rssiBLE) + "}";
+    connect->publishTelemetry(notification);
+}
+
+// ============================================================
+// EXEMPLO 5: Enviar resumo de todos os dispositivos
+// ============================================================
+
+// Criar método em Distributor.cpp:
+
+void Distributor::enviarResumoGeral() {
+    const size_t capacity = JSON_ARRAY_SIZE(users.size()) + 
+                           users.size() * JSON_OBJECT_SIZE(8) + 1024;
+    DynamicJsonDocument doc(capacity);
+    
+    JsonArray devices = doc.createNestedArray("devices");
+    
+    for (size_t i = 0; i < users.size(); i++) {
+        if (users[i].isLoggedIn()) {
+            JsonObject device = devices.createNestedObject();
+            device["id"] = users[i].getId();
+            device["rssi"] = users[i].getAnalog().getValue();
+            device["battery"] = users[i].getBatteryLevel();
+        }
+    }
+    
+    doc["totalDevices"] = users.size();
+    doc["timestamp"] = millis();
+    
+    String json;
+    serializeJson(doc, json);
+    connect->publishTelemetry(json);
+}
+
+// Adicione a declaração em Distributor.h:
+// void enviarResumoGeral();
+
+// ============================================================
+// EXEMPLO 6: Sistema de alertas
+// ============================================================
+
+// Verificar condições e enviar alertas:
+
+for (size_t i = 0; i < users.size(); i++) {
+    // Alerta: Bateria baixa
+    if (users[i].getBatteryLevel() < 20 && users[i].getBatteryLevel() > 0) {
+        String alerta = "{\"alert\":\"low_battery\",\"deviceId\":\"" + 
+                       users[i].getId() + "\",\"battery\":" + 
+                       String(users[i].getBatteryLevel()) + "}";
+        connect->publishTelemetry(alerta);
+    }
+    
+    // Alerta: RSSI muito fraco
+    if (users[i].getAnalog().getValue() < -85) {
+        String alerta = "{\"alert\":\"weak_signal\",\"deviceId\":\"" + 
+                       users[i].getId() + "\",\"rssi\":" + 
+                       String(users[i].getAnalog().getValue()) + "}";
+        connect->publishTelemetry(alerta);
+    }
+}
+
+// ============================================================
+// EXEMPLO 7: Enviar mensagem de boot no setup()
+// ============================================================
+
+void setup() {
+    Serial.begin(115200);
+    
+    connect = new Connect(/* ... parâmetros ... */);
+
+    if(connect->validateStatusWIFI()) {
+        connect->getOn(DEVICE_ID);
+        
+        // Conectar MQTT
+        if (connect->connectMQTT()) {
+            Serial.println("✓ MQTT Conectado!");
+            
+            // ENVIAR MENSAGEM DE BOOT
+            String bootMsg = "{\"event\":\"boot\",\"deviceId\":\"" + 
+                           String(DEVICE_ID) + "\",\"timestamp\":" + 
+                           String(millis()) + "}";
+            connect->publishTelemetry(bootMsg);
+        }
+        
+        // ... resto do código BLE ...
+    }
+}
+
+// ============================================================
+// EXEMPLO 8: Enviar status completo
+// ============================================================
+
+void enviarStatusCompleto() {
+    DynamicJsonDocument doc(512);
+    
+    // Informações do dispositivo
+    doc["deviceId"] = DEVICE_ID;
+    doc["uptime"] = millis();
+    doc["freeHeap"] = ESP.getFreeHeap();
+    doc["wifiRSSI"] = WiFi.RSSI();
+    doc["wifiSSID"] = WiFi.SSID();
+    doc["ipAddress"] = WiFi.localIP().toString();
+    
+    // Estatísticas BLE
+    doc["totalDevices"] = distributor->getUsers().size();
+    
+    int loggedInCount = 0;
+    for (auto& user : distributor->getUsers()) {
+        if (user.isLoggedIn()) loggedInCount++;
+    }
+    doc["devicesLoggedIn"] = loggedInCount;
+    
+    // Status MQTT
+    doc["mqttConnected"] = connect->isMQTTConnected();
+    
+    String json;
+    serializeJson(doc, json);
+    connect->publishTelemetry(json);
+}
+
+// Chamar no loop() a cada 5 minutos:
+static unsigned long lastStatus = 0;
+if (millis() - lastStatus > 300000) {
+    enviarStatusCompleto();
+    lastStatus = millis();
+}
+
+// ============================================================
+// EXEMPLO 9: Enviar dados com ArduinoJson
+// ============================================================
+
+DynamicJsonDocument doc(256);
+doc["temperature"] = 25.5;
+doc["humidity"] = 60;
+doc["deviceId"] = DEVICE_ID;
+doc["timestamp"] = millis();
+
+String jsonData;
+serializeJson(doc, jsonData);
+connect->publishTelemetry(jsonData);
+
+// ============================================================
+// EXEMPLO 10: Verificar conexão MQTT
+// ============================================================
+
+if (connect->isMQTTConnected()) {
+    Serial.println("✓ MQTT Conectado!");
+} else {
+    Serial.println("✗ MQTT Desconectado, reconectando...");
+    connect->connectMQTT();
+}
+
+═══════════════════════════════════════════════════════════════
+  FIM DOS EXEMPLOS - Use como referência para implementar
+═══════════════════════════════════════════════════════════════

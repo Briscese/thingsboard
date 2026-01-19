@@ -2,9 +2,11 @@
 
 Connect::Connect(const char* name, const char* password, 
                  const char* alternative_name, const char* alternative_password,
-                 const char* server_pwd, int wifi_limit, int max_error_mode, String api_url)
+                 const char* server_pwd, int wifi_limit, int max_error_mode, String api_url,
+                 const char* mqtt_server, int mqtt_port, const char* mqtt_token, const char* mqtt_topic)
     : server(80),
       timeClient(ntpUDP, "a.st1.ntp.br", -10800, 60000),
+      mqttClient(wifiClient),
       NAME(name),
       PASSWORD(password),
       ALTERNATIVE_NAME(alternative_name),
@@ -13,6 +15,10 @@ Connect::Connect(const char* name, const char* password,
       WIFI_LIMIT(wifi_limit),
       MAX_ERROR_MODE(max_error_mode),
       API_URL(api_url),
+      MQTT_SERVER(mqtt_server),
+      MQTT_PORT(mqtt_port),
+      MQTT_TOKEN(mqtt_token),
+      MQTT_TOPIC(mqtt_topic),
       errorMode(false),
       sending(false),
       attempts(0),
@@ -21,6 +27,7 @@ Connect::Connect(const char* name, const char* password,
       initErrorMode(0)
 {
     updatePreferences();
+    mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
 }
 
 void Connect::activeSoftAP() {
@@ -335,4 +342,53 @@ void Connect::updateBoard(String url) {
         case HTTP_UPDATE_OK:
             break;
     }
+}
+
+// Métodos MQTT
+bool Connect::connectMQTT() {
+    if (mqttClient.connected()) {
+        return true;
+    }
+    
+    Serial.print("Conectando ao ThingsBoard MQTT...");
+    
+    // Tenta conectar ao ThingsBoard usando o token como username
+    if (mqttClient.connect("ESP32Client", MQTT_TOKEN, nullptr)) {
+        Serial.println(" Conectado!");
+        return true;
+    } else {
+        Serial.print(" Falhou, rc=");
+        Serial.println(mqttClient.state());
+        return false;
+    }
+}
+
+bool Connect::publishTelemetry(const String& jsonData) {
+    if (!mqttClient.connected()) {
+        if (!connectMQTT()) {
+            return false;
+        }
+    }
+    
+    Serial.println("Publicando telemetria: " + jsonData);
+    bool result = mqttClient.publish(MQTT_TOPIC, jsonData.c_str());
+    
+    if (result) {
+        Serial.println("Telemetria enviada com sucesso!");
+    } else {
+        Serial.println("Falha ao enviar telemetria");
+    }
+    
+    return result;
+}
+
+bool Connect::isMQTTConnected() {
+    return mqttClient.connected();
+}
+
+void Connect::loopMQTT() {
+    if (!mqttClient.connected()) {
+        connectMQTT();
+    }
+    mqttClient.loop();
 }
