@@ -161,8 +161,8 @@ void Advertisements::processTelemetry(uint8_t *data, size_t len)
     
     // 📡 Enviar dados de telemetria para ThingsBoard (buffer estático para evitar alocações)
     if (connect != nullptr && connect->isMQTTConnected()) {
-        static DynamicJsonDocument doc(320);
-        static char jsonBuf[320];
+        static DynamicJsonDocument doc(512);
+        static char jsonBuf[512];
         doc.clear();
 
         doc["messageType"] = "telemetry_tlm";
@@ -181,6 +181,7 @@ void Advertisements::processTelemetry(uint8_t *data, size_t len)
 
         size_t written = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
         if (written > 0 && written < sizeof(jsonBuf)) {
+            connect->loopMQTT();
             if (connect->publishTelemetryRaw(jsonBuf, written)) {
                 Serial.printf("✅ Telemetria enviada: %s\n", jsonBuf);
             } else {
@@ -245,8 +246,8 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
         
         // 📡 Enviar dados de acelerômetro para ThingsBoard imediatamente
         if (connect != nullptr && connect->isMQTTConnected()) {
-            static DynamicJsonDocument doc(384);  // buffer maior para evitar overflow/{ }
-            static char jsonBuf[320];             // static to stay off the heap
+            static DynamicJsonDocument doc(640);  // buffer maior para evitar overflow/{ }
+            static char jsonBuf[640];             // static to stay off the heap
             doc.clear();
 
             doc["messageType"] = "accelerometer";
@@ -278,6 +279,7 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
             
             size_t written = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
             if (written > 0 && written < sizeof(jsonBuf)) {
+                connect->loopMQTT();
                 if (connect->publishTelemetryRaw(jsonBuf, written)) {
                     Serial.printf("✅ Acelerometro enviado: %s\n", jsonBuf);
                 } else {
