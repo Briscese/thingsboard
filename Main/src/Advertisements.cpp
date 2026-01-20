@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include "Distributor.h"
 #include "Connect.h"
+#include "config/Config.h"
 #include <ArduinoJson.h>
 #include "esp_log.h"
 #include <BLEScan.h>
@@ -134,27 +135,8 @@ void Advertisements::processIBeacon()
 
     if (len == 25)
     {
-        Serial.printf("\n📦 Raw Data: ");
-        for (size_t i = 0; i < len; i++)
-        {
-            Serial.printf("%02X ", cManufacturerData[i]);
-        }
-        Serial.println();
-
-        Serial.printf("🔍 Device Found: %s\n", device.toString().c_str());
-        Serial.printf("📶 RSSI: %d dBm\n", device.getRSSI());
-
         BLEBeacon oBeacon = BLEBeacon();
         oBeacon.setData(manufacturerData);
-
-        Serial.printf("\n🏷️  iBeacon Information:\n");
-        Serial.printf("🆔 ID: %04X\n", oBeacon.getManufacturerId());
-        Serial.printf("📍 Major: %d\n", ENDIAN_CHANGE_U16(oBeacon.getMajor()));
-        Serial.printf("📍 Minor: %d\n", ENDIAN_CHANGE_U16(oBeacon.getMinor()));
-        Serial.printf("🔑 UUID: %s\n", oBeacon.getProximityUUID().toString().c_str());
-        Serial.printf("⚡ Power: %d dBm\n", oBeacon.getSignalPower());
-        Serial.println();
-
         deviceType = 1;
     }
 }
@@ -163,49 +145,44 @@ void Advertisements::processTelemetry(uint8_t *data, size_t len)
 {
     if (len < 14)
         return;
-    Serial.printf("\n🔍 Device: %s\n", macAddress.c_str());
     uint8_t version = data[1];
     uint16_t batteryVoltage = (data[2] << 8) | data[3];
     int16_t temperature = (data[4] << 8) | data[5];
     uint32_t packetCount = (data[6] << 24) | (data[7] << 16) | (data[8] << 8) | data[9];
     uint32_t uptime = (data[10] << 24) | (data[11] << 16) | (data[12] << 8) | data[13];
 
-    Serial.printf("\n📊 Telemetry:\n");
-    Serial.printf("📱 Version: %d\n", version);
-    // ⚠️ Avoid float formatting in sprintf - causes malloc/dtoa crash
     uint16_t batteryMV = batteryVoltage;
     uint8_t batteryPercent = GetBattery((float)batteryVoltage / 1000);
-    Serial.printf("🔋 Battery: %u mV (%d%%)\n", batteryMV, batteryPercent);
     int16_t tempRaw = temperature;
-    Serial.printf("🌡️ Temperature: %d (raw)\n", tempRaw);
-    Serial.printf("📝 Packets: %u\n", packetCount);
-    Serial.printf("⏱️ Uptime: %u (×10ms)\n", uptime);
-    Serial.println();
+    float temperatureC = static_cast<int8_t>(data[4]) + (static_cast<float>(data[5]) / 256.0f);
 
     batteryLevel = batteryPercent;
     timeActivity = (uptime / 10.0) / 86400;
     
-    // 📡 Enviar dados de telemetria para ThingsBoard
+    // 📡 Enviar dados de telemetria para ThingsBoard (buffer estático para evitar alocações)
     if (connect != nullptr && connect->isMQTTConnected()) {
-        DynamicJsonDocument doc(256);
-        String macStr(macAddress.c_str());
-        doc["deviceId"] = macStr;
-        doc["mac"] = macStr;
+        static DynamicJsonDocument doc(320);
+        static char jsonBuf[320];
+        doc.clear();
+
+        doc["messageType"] = "telemetry_tlm";
+        doc["gatewayId"] = DEVICE_ID;
+        doc["deviceId"] = macAddress;
+        doc["mac"] = macAddress;
         doc["battery"] = batteryPercent;
         doc["batteryMV"] = batteryMV;
-        doc["temperature"] = tempRaw;
+        doc["temperatureRaw"] = tempRaw;
+        doc["temperatureC"] = temperatureC;
         doc["packetCount"] = packetCount;
         doc["uptime"] = uptime;
         doc["rssi"] = rssi;
         doc["deviceType"] = 3;
-        doc["timestamp"] = millis();
-        
-        String jsonData;
-        serializeJson(doc, jsonData);
-        
-        if (!jsonData.isEmpty() && jsonData != "{}") {
-            if (connect->publishTelemetry(jsonData)) {
-                Serial.println("✅ Dados de telemetria enviados ao ThingsBoard!");
+        doc["ts"] = connect->getEpochMillis();
+
+        size_t written = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
+        if (written > 0 && written < sizeof(jsonBuf)) {
+            if (connect->publishTelemetryRaw(jsonBuf, written)) {
+                Serial.printf("✅ Telemetria enviada: %s\n", jsonBuf);
             } else {
                 Serial.println("❌ Falha ao enviar dados de telemetria");
             }
@@ -234,21 +211,27 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
     if (len <= maxIdx)
         return;
 
-    Serial.printf("🔍 Minew Device: %s\n", macAddress.c_str());
+    // Identificar vendor pela tabela de offsets
+    const char* vendor = "unknown";
+    if (offset == minewOffSet) {
+        vendor = "minew";
+    } else if (offset == mokoOffSet) {
+        vendor = "moko";
+    }
+    
+    // ⏱️ Rate limiting: wait 500ms minimum between MQTT publishes to prevent heap exhaustion
+    static unsigned long lastPublishTime = 0;
+    unsigned long now = millis();
+    if (now - lastPublishTime < 500) {
+        delay(500 - (now - lastPublishTime));
+    }
+    lastPublishTime = millis();
 
     uint8_t version = data[offset[0]];
     batteryLevel = data[offset[1]];
     x = GetAccelerometer(data[offset[2]], data[offset[3]]);
     y = GetAccelerometer(data[offset[4]], data[offset[5]]);
     z = GetAccelerometer(data[offset[6]], data[offset[7]]);
-
-    Serial.printf("\n📱 Version: %d\n", version);
-    Serial.printf("🔋 Battery: %d%%\n", batteryLevel);
-    Serial.printf("🎯 Accelerometer:\n");
-    Serial.printf("  ➡️ X: %.2f\n", x);
-    Serial.printf("  ⬆️ Y: %.2f\n", y);
-    Serial.printf("  ↗️ Z: %.2f\n", z);
-    Serial.println();
 
     deviceType = 4;
     deviceCode = macAddress;  // ✅ Usar macAddress diretamente (não temporário)
@@ -262,24 +245,41 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
         
         // 📡 Enviar dados de acelerômetro para ThingsBoard imediatamente
         if (connect != nullptr && connect->isMQTTConnected()) {
-            DynamicJsonDocument doc(256);
-            String macStr(macAddress.c_str());
-            doc["deviceId"] = macStr;
-            doc["mac"] = macStr;
+            static DynamicJsonDocument doc(384);  // buffer maior para evitar overflow/{ }
+            static char jsonBuf[320];             // static to stay off the heap
+            doc.clear();
+
+            doc["messageType"] = "accelerometer";
+            doc["gatewayId"] = DEVICE_ID;
+            doc["deviceId"] = macAddress;
+            doc["mac"] = macAddress;
             doc["battery"] = batteryLevel;
-            doc["x"] = roundf(x * 1000) / 1000;
-            doc["y"] = roundf(y * 1000) / 1000;
-            doc["z"] = roundf(z * 1000) / 1000;
+            doc["vendor"] = vendor;
+            doc["sourceUuid"] = (offset == minewOffSet) ? "0xFFE1" : (offset == mokoOffSet) ? "0xFEAB" : "unknown";
+            
+            // Usar chaves prefixadas por vendor para evitar mistura no ThingsBoard
+            if (strcmp(vendor, "minew") == 0) {
+                doc["x_minew"] = roundf(x * 1000) / 1000;
+                doc["y_minew"] = roundf(y * 1000) / 1000;
+                doc["z_minew"] = roundf(z * 1000) / 1000;
+            } else if (strcmp(vendor, "moko") == 0) {
+                doc["x_moko"] = roundf(x * 1000) / 1000;
+                doc["y_moko"] = roundf(y * 1000) / 1000;
+                doc["z_moko"] = roundf(z * 1000) / 1000;
+            } else {
+                doc["x"] = roundf(x * 1000) / 1000;
+                doc["y"] = roundf(y * 1000) / 1000;
+                doc["z"] = roundf(z * 1000) / 1000;
+            }
+            
             doc["rssi"] = rssi;
             doc["deviceType"] = deviceType;
-            doc["timestamp"] = millis();
+            doc["ts"] = connect->getEpochMillis();
             
-            String jsonData;
-            serializeJson(doc, jsonData);
-            
-            if (!jsonData.isEmpty() && jsonData != "{}") {
-                if (connect->publishTelemetry(jsonData)) {
-                    Serial.println("✅ Dados de acelerômetro enviados ao ThingsBoard!");
+            size_t written = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
+            if (written > 0 && written < sizeof(jsonBuf)) {
+                if (connect->publishTelemetryRaw(jsonBuf, written)) {
+                    Serial.printf("✅ Acelerometro enviado: %s\n", jsonBuf);
                 } else {
                     Serial.println("❌ Falha ao enviar dados de acelerômetro");
                 }
@@ -296,15 +296,10 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
 
     Serial.printf("Devices Found: %d\n", maxDevices);
 
-    // ⚠️ SAFETY: limit to avoid stack/memory issues when many devices are present
-    int deviceCount = maxDevices;
-    if (deviceCount > 100)
-    {
-        Serial.printf("⚠️  Device limit: Processing max 100 of %d\n", deviceCount);
-        deviceCount = 100;
-    }
+    const int accelLimit = 60;
+    int accelProcessed = 0;
 
-    for (int i = 0; i < deviceCount; i++)
+    for (int i = 0; i < maxDevices; i++)
     {
         try
         {
@@ -340,13 +335,6 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
             uint8_t data[64];
             memcpy(data, sd.c_str(), len);
 
-            // 📊 Log: Show UUID, size, type, and full hex
-            Serial.printf("\n📦 Service Data UUID: %s | Size: %u bytes | Type: 0x%02X | Data: ",
-                          serviceUUID.toString().c_str(), (unsigned)len, data[0]);
-            for (size_t j = 0; j < len; j++)
-                Serial.printf("%02X ", data[j]);
-            Serial.printf("\n📶 RSSI: %d dBm\n", advertisedDevice.getRSSI());
-
             // ✅ Match against table
             for (const mapData &item : list)
             {
@@ -359,29 +347,28 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
                 // If accelerometer (Minew/Moko): validate type and minimum size by offsets
                 if (!item.offset.empty())
                 {
+                    if (accelProcessed >= accelLimit)
+                    {
+                        continue;
+                    }
 
                     if (len < 1)
                         continue;
 
                     if (data[0] != item.type)
                     {
-                        Serial.printf("❌ Tipo mismatch: esperado 0x%02X, recebido 0x%02X\n", item.type, data[0]);
                         continue;
                     }
 
                     size_t minRequired = (size_t)(*std::max_element(item.offset.begin(), item.offset.end()) + 1);
                     if (len < minRequired)
                     {
-                        Serial.printf("⚠️  Pacote curto: %u bytes, mínimo %u bytes para UUID 0x%04X\n",
-                                      (unsigned)len, (unsigned)minRequired, item.uuid);
                         continue;
                     }
 
-                    Serial.printf("✅ Processando ACCELEROMETER (UUID 0x%04X, Tipo 0x%02X): %u bytes\n",
-                                  item.uuid, item.type, (unsigned)len);
-
                     // Safe cast (processAccelerometer expects uint8_t*)
                     processAccelerometer((uint8_t *)data, len, item.offset);
+                    accelProcessed++;
 
                 }
                 else
@@ -389,22 +376,20 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
                     // Telemetry (Eddystone TLM normally 0x20, with 14 bytes)
                     if (len >= 14)
                     {
-                        Serial.printf("✅ Processando TELEMETRY (UUID 0x%04X): %u bytes\n",
-                                      item.uuid, (unsigned)len);
                         processTelemetry((uint8_t *)data, len);
-                    }
-                    else
-                    {
-                        Serial.printf("⚠️  Telemetria curta: %u bytes (mínimo 14)\n", (unsigned)len);
                     }
                 }
             }
         }
         catch (...)
         {
-            Serial.printf("❌ Exception processing device %d\n", i);
             continue;
         }
     }
+    if (accelProcessed >= accelLimit)
+    {
+        Serial.printf("⚠️  Accelerometer limit atingido (%d). Aguardando próximo ciclo.\n", accelLimit);
+    }
+
     Serial.printf("✅ ListDevices() completou com sucesso!\n");
 }

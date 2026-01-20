@@ -29,10 +29,14 @@ public:
     String getSendId() const { return sendId; }
     bool isErrorMode() const { return errorMode; }
     bool isSending() const { return sending; }
+    bool syncTime();
+    uint64_t getEpochMillis();
+    bool hasSyncedTime() const { return timeSynced; }
     
     // Métodos MQTT
     bool connectMQTT();
     bool publishTelemetry(const String& jsonData);
+    bool publishTelemetryRaw(const char* data, size_t length = 0);
     bool isMQTTConnected();
     void loopMQTT();
 
@@ -68,6 +72,9 @@ private:
     unsigned long initErrorMode;
     String sendId;
     String header;
+    bool timeSynced;
+    const long TIME_OFFSET_SECONDS;
+    bool timeClientStarted;
 };
 
 #endif

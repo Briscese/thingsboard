@@ -2,6 +2,7 @@
 #include "Distributor.h"
 #include "Advertisements.h"
 #include "Connect.h"
+#include "config/Config.h"
 
 extern Connect* connect;
 
@@ -291,17 +292,12 @@ void Distributor::process()
           Serial.println("🔵 Iniciando BLE scan...");
           BLEScanResults* foundDevices = pBLEScan->start(3, false);
           Serial.printf("🔵 Scan completo! Encontrados: %d dispositivos\n", foundDevices ? foundDevices->getCount() : 0);
-          
           if (foundDevices != nullptr) {
             Serial.println("🟡 Processando dispositivos com ListDevices()...");
             advertisements->ListDevices(*foundDevices);
             Serial.println("✅ ListDevices() completou com sucesso!");
-            
-            // Agora limpa os resultados
-            // Serial.println("🟡 Limpando resultados com clearResults()...");
-            // pBLeScan->clearResults();
-            // Serial.println("✅ clearResults() completo!");
           }
+          pBLEScan->clearResults();
         }
         lastScanTime = millis();
     }
@@ -334,9 +330,11 @@ void Distributor::sendDataToThingsBoard(User& user) {
     }
     
     // Criar JSON com os dados do usuário
-    const size_t capacity = JSON_OBJECT_SIZE(12) + 200;
+    const size_t capacity = JSON_OBJECT_SIZE(16) + 220;
     DynamicJsonDocument doc(capacity);
     
+    doc["messageType"] = "aggregated_telemetry";
+    doc["gatewayId"] = DEVICE_ID;
     doc["deviceId"] = user.getId();
     doc["mac"] = user.getMac();
     doc["rssi"] = user.getAnalog().getValue();
@@ -348,7 +346,11 @@ void Distributor::sendDataToThingsBoard(User& user) {
     doc["timeActivity"] = user.getTimeActivity();
     doc["deviceType"] = user.getDeviceTypeUser();
     doc["loggedIn"] = user.isLoggedIn();
-    doc["timestamp"] = millis();
+    if (connect != nullptr) {
+      doc["ts"] = connect->getEpochMillis();
+    } else {
+      doc["ts"] = millis();
+    }
     
     String jsonString;
     serializeJson(doc, jsonString);

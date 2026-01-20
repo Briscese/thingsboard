@@ -3,7 +3,7 @@
 Connect::Connect(const char* name, const char* password, 
                  const char* alternative_name, const char* alternative_password,
                  const char* server_pwd, int wifi_limit, int max_error_mode, String api_url,
-                 const char* mqtt_server, int mqtt_port, const char* mqtt_token, const char* mqtt_topic)
+                                 const char* mqtt_server, int mqtt_port, const char* mqtt_token, const char* mqtt_topic)
     : server(80),
       timeClient(ntpUDP, "a.st1.ntp.br", -10800, 60000),
       mqttClient(wifiClient),
@@ -24,10 +24,14 @@ Connect::Connect(const char* name, const char* password,
       attempts(0),
       communicationErrors(0),
       lastSendTime(0),
-      initErrorMode(0)
+              initErrorMode(0),
+              timeSynced(false),
+              TIME_OFFSET_SECONDS(-10800),
+              timeClientStarted(false)
 {
     updatePreferences();
     mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+    mqttClient.setBufferSize(1024);
 }
 
 void Connect::activeSoftAP() {
@@ -210,6 +214,10 @@ bool Connect::validateStatusWIFI() {
         }
         attempts = 0;
     }
+    if (WiFi.status() == WL_CONNECTED && !timeSynced) {
+        syncTime();
+    }
+
     return attempts == 0;
 }
 
@@ -344,6 +352,44 @@ void Connect::updateBoard(String url) {
     }
 }
 
+bool Connect::syncTime() {
+    if (WiFi.status() != WL_CONNECTED) {
+        timeSynced = false;
+        return false;
+    }
+
+    if (!timeClientStarted) {
+        timeClient.begin();
+        timeClientStarted = true;
+    }
+
+    const uint8_t maxAttempts = 4;
+    for (uint8_t attempt = 0; attempt < maxAttempts; ++attempt) {
+        if (timeClient.forceUpdate()) {
+            timeSynced = true;
+            return true;
+        }
+        delay(200);
+    }
+
+    timeSynced = false;
+    return false;
+}
+
+uint64_t Connect::getEpochMillis() {
+    if (!timeSynced) {
+        syncTime();
+    }
+
+    unsigned long epochWithOffset = timeClient.getEpochTime();
+    if (epochWithOffset == 0) {
+        return millis();
+    }
+
+    long epochUtc = static_cast<long>(epochWithOffset) - TIME_OFFSET_SECONDS;
+    return static_cast<uint64_t>(epochUtc) * 1000ULL;
+}
+
 // Métodos MQTT
 bool Connect::connectMQTT() {
     if (mqttClient.connected()) {
@@ -364,21 +410,37 @@ bool Connect::connectMQTT() {
 }
 
 bool Connect::publishTelemetry(const String& jsonData) {
+    return publishTelemetryRaw(jsonData.c_str(), jsonData.length());
+}
+
+bool Connect::publishTelemetryRaw(const char* data, size_t length) {
+    if (data == nullptr) {
+        Serial.println("Falha ao enviar telemetria: payload nulo");
+        return false;
+    }
+
     if (!mqttClient.connected()) {
         if (!connectMQTT()) {
             return false;
         }
     }
-    
-    Serial.println("Publicando telemetria: " + jsonData);
-    bool result = mqttClient.publish(MQTT_TOPIC, jsonData.c_str());
-    
+
+    if (length == 0) {
+        length = strlen(data);
+    }
+
+    Serial.print("Publicando telemetria: ");
+    Serial.write(reinterpret_cast<const uint8_t*>(data), length);
+    Serial.println();
+
+    bool result = mqttClient.publish(MQTT_TOPIC,
+                                     reinterpret_cast<const uint8_t*>(data),
+                                     length);
     if (result) {
         Serial.println("Telemetria enviada com sucesso!");
     } else {
         Serial.println("Falha ao enviar telemetria");
     }
-    
     return result;
 }
 

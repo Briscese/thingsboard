@@ -37,6 +37,7 @@ void setup() {
     );
 
     if(connect->validateStatusWIFI()) {
+        connect->syncTime();
         connect->getOn(DEVICE_ID);
         
         // Conectar ao MQTT ThingsBoard
