@@ -26,6 +26,7 @@ public:
     Distributor(std::vector<User>& users, BLEScan* pBLEScan, String api_url);
     void process();
     int findUser(const String& id);
+    bool validateDeviceCodeWithMAC(const String& deviceCode, const String& macAddress);
     void UserRegisterData(const std::string& macAddress, const std::string& code, int rssiBLE, 
                          int deviceType, int batterylevel, float x, float y, float z, 
                          float timeActivity,  String name);

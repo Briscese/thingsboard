@@ -38,6 +38,7 @@ void setup() {
 
     if(connect->validateStatusWIFI()) {
         connect->syncTime();
+        // MQTT-only TurnOn event
         connect->getOn(DEVICE_ID);
         
         // Conectar ao MQTT ThingsBoard
@@ -93,6 +94,7 @@ void loop() {
             if (distributor != nullptr) {
                 distributor->process();
             }
+            // MQTT-only TurnOn event
             connect->getOn(DEVICE_ID);
     }
   }

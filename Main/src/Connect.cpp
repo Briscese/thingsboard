@@ -111,21 +111,20 @@ bool Connect::validateStatusWIFI() {
 
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("WiFi Status: Disconnected");
-        WiFi.begin(NAME, PASSWORD);
-        Serial.print("RSSI: ");
-        Serial.println(WiFi.RSSI());
+        if (WiFi.status() != WL_CONNECTED) {
+            WiFi.mode(WIFI_STA);
+            WiFi.disconnect(true, true);
+            delay(100);
+            WiFi.begin(NAME, PASSWORD);
+            Serial.print("RSSI: ");
+            Serial.println(WiFi.RSSI());
+        } else {
+            Serial.println("WiFi Status: Connecting");
+        }
 
         while (WiFi.status() != WL_CONNECTED) {
             Serial.print("Network: ");
             Serial.println(NAME);
-
-            if (attempts == 3) {
-                Serial.print("Network: ");
-                Serial.println(NAME);
-                WiFi.begin(NAME, PASSWORD);
-                Serial.print("RSSI: ");
-                Serial.println(WiFi.RSSI());
-            }
 
             if (attempts <= 10) {
                 delay(1000);
@@ -165,6 +164,8 @@ bool Connect::validateStatusWIFI() {
                 if (attempts == 11) {
                     Serial.print("Network: ");
                     Serial.println(ALTERNATIVE_NAME);
+                    WiFi.disconnect(true, true);
+                    delay(100);
                     WiFi.begin(ALTERNATIVE_NAME, ALTERNATIVE_PASSWORD);
                     Serial.print("RSSI: ");
                     Serial.println(WiFi.RSSI());
@@ -173,6 +174,8 @@ bool Connect::validateStatusWIFI() {
                 if (attempts == 20) {
                     Serial.print("Network: ");
                     Serial.println(NAME);
+                    WiFi.disconnect(true, true);
+                    delay(100);
                     WiFi.begin(NAME, PASSWORD);
                     Serial.print("RSSI: ");
                     Serial.println(WiFi.RSSI());
@@ -294,7 +297,7 @@ void Connect::loadErrorMode() {
 }
 
 void Connect::getOn(String s) {
-    if (millis() - lastSendTime > 12000) {
+    if (millis() - lastSendTime > 60000) {
         Serial.println();
         Serial.print("Sent TURNON: ");
         Serial.println(s);
@@ -302,39 +305,21 @@ void Connect::getOn(String s) {
         lastSendTime = millis();
 
         if (validateStatusWIFI()) {
-            StaticJsonDocument<1500> document;
+            // MQTT-only: publish TurnOn event to ThingsBoard
+            StaticJsonDocument<256> doc;
             int wifiRssi = WiFi.RSSI() * -1;
-        
-            StaticJsonDocument<200> doc;
-            String output;
-            doc["code"] = s;
-            doc["rssi"] = wifiRssi;
+            doc["messageType"] = "turnon";
+            doc["deviceId"] = s;
+            doc["mac"] = WiFi.macAddress();
+            doc["wifiRSSI"] = wifiRssi;
             doc["version"] = "12.0.0.0v-point-service-0000030042025.bin";
-         
-            serializeJson(doc, output);
-            
-            if (http.begin(API_URL + "/TurnOn")) {
-                http.addHeader("Content-Type", "application/json");
-                http.setTimeout(15000);
-                
-                int httpCode = http.POST(output);
-                if (httpCode >= 200) {
-                    if (httpCode == 200) {
-                        lastSendTime = millis();
-                        String result = http.getString();
-                        DeserializationError error = deserializeJson(document, result);
+            doc["ts"] = getEpochMillis();
+            String jsonData;
+            serializeJson(doc, jsonData);
+            publishTelemetry(jsonData);
 
-                        if (!error) {
-                            if (document["updateURL"]) {
-                                http.end();
-                                updateBoard(document["updateURL"]);
-                            }
-                        }
-                    }
-                } else {
-                    communicationErrors++;
-                }
-            }
+            // HTTP disabled: this board should only use MQTT
+            return;
         }
     }
 }

@@ -15,6 +15,7 @@
 #include <deque>
 #include <vector>
 #include <iostream>
+#include <cctype>
 
 #define ENDIAN_CHANGE_U16(x) ((((x) & 0xFF000000) >> 24) + (((x) & 0x00FF0000) >> 8) + ((((x) & 0xFF00) << 8) + (((x) & 0xFF) << 24)))
 extern Distributor *distributor;
@@ -97,6 +98,26 @@ float GetAccelerometer(uint8_t msb, uint8_t lsb)
     return result;
 }
 
+static std::string GetMacLast4(const std::string& mac) {
+    std::string last4;
+    last4.reserve(4);
+    for (int i = static_cast<int>(mac.length()) - 1; i >= 0 && last4.length() < 4; --i) {
+        char c = mac[static_cast<size_t>(i)];
+        if ((c >= '0' && c <= '9') ||
+            (c >= 'A' && c <= 'F') ||
+            (c >= 'a' && c <= 'f')) {
+            last4.insert(last4.begin(), c);
+        }
+    }
+    if (last4.length() < 4) {
+        return mac;
+    }
+    for (char& c : last4) {
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+    return last4;
+}
+
 String Advertisements::getMacAddress()
 {
     String deviceStr = device.toString();
@@ -145,6 +166,13 @@ void Advertisements::processTelemetry(uint8_t *data, size_t len)
 {
     if (len < 14)
         return;
+    
+    // ⚠️ Verificar se macAddress foi inicializado
+    if (macAddress.empty()) {
+        Serial.println("❌ ERRO: macAddress não inicializado em processTelemetry!");
+        return;
+    }
+    
     uint8_t version = data[1];
     uint16_t batteryVoltage = (data[2] << 8) | data[3];
     int16_t temperature = (data[4] << 8) | data[5];
@@ -165,18 +193,13 @@ void Advertisements::processTelemetry(uint8_t *data, size_t len)
         static char jsonBuf[512];
         doc.clear();
 
+        // Campos necessários para a rule chain processar corretamente
         doc["messageType"] = "telemetry_tlm";
-        doc["gatewayId"] = DEVICE_ID;
-        doc["deviceId"] = macAddress;
-        doc["mac"] = macAddress;
+        doc["deviceId"] = macAddress.c_str();
+        doc["mac"] = macAddress.c_str();
         doc["battery"] = batteryPercent;
-        doc["batteryMV"] = batteryMV;
-        doc["temperatureRaw"] = tempRaw;
         doc["temperatureC"] = temperatureC;
-        doc["packetCount"] = packetCount;
-        doc["uptime"] = uptime;
         doc["rssi"] = rssi;
-        doc["deviceType"] = 3;
         doc["ts"] = connect->getEpochMillis();
 
         size_t written = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
@@ -187,6 +210,8 @@ void Advertisements::processTelemetry(uint8_t *data, size_t len)
             } else {
                 Serial.println("❌ Falha ao enviar dados de telemetria");
             }
+        } else {
+            Serial.printf("❌ JSON serialization failed: written=%u, bufsize=%u\n", written, sizeof(jsonBuf));
         }
     }
 }
@@ -212,6 +237,12 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
     if (len <= maxIdx)
         return;
 
+    // ⚠️ Verificar se macAddress foi inicializado
+    if (macAddress.empty()) {
+        Serial.println("❌ ERRO: macAddress não inicializado em processAccelerometer!");
+        return;
+    }
+
     // Identificar vendor pela tabela de offsets
     const char* vendor = "unknown";
     if (offset == minewOffSet) {
@@ -219,14 +250,11 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
     } else if (offset == mokoOffSet) {
         vendor = "moko";
     }
-    
-    // ⏱️ Rate limiting: wait 500ms minimum between MQTT publishes to prevent heap exhaustion
-    static unsigned long lastPublishTime = 0;
-    unsigned long now = millis();
-    if (now - lastPublishTime < 500) {
-        delay(500 - (now - lastPublishTime));
+
+    // Somente MOKO: ignora Minew/unknown
+    if (strcmp(vendor, "moko") != 0) {
+        return;
     }
-    lastPublishTime = millis();
 
     uint8_t version = data[offset[0]];
     batteryLevel = data[offset[1]];
@@ -235,7 +263,7 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
     z = GetAccelerometer(data[offset[6]], data[offset[7]]);
 
     deviceType = 4;
-    deviceCode = macAddress;  // ✅ Usar macAddress diretamente (não temporário)
+    deviceCode = GetMacLast4(macAddress);  // Usar os 4 últimos hex do MAC (ex: 595C)
     if (device.haveName())
         name = device.getName().c_str();
     else
@@ -246,35 +274,19 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
         
         // 📡 Enviar dados de acelerômetro para ThingsBoard imediatamente
         if (connect != nullptr && connect->isMQTTConnected()) {
-            static DynamicJsonDocument doc(640);  // buffer maior para evitar overflow/{ }
-            static char jsonBuf[640];             // static to stay off the heap
+            static DynamicJsonDocument doc(512);
+            static char jsonBuf[512];
             doc.clear();
 
+            // Campos necessários para a rule chain processar corretamente
             doc["messageType"] = "accelerometer";
-            doc["gatewayId"] = DEVICE_ID;
-            doc["deviceId"] = macAddress;
-            doc["mac"] = macAddress;
+            doc["deviceId"] = macAddress.c_str();
+            doc["mac"] = macAddress.c_str();
             doc["battery"] = batteryLevel;
-            doc["vendor"] = vendor;
-            doc["sourceUuid"] = (offset == minewOffSet) ? "0xFFE1" : (offset == mokoOffSet) ? "0xFEAB" : "unknown";
-            
-            // Usar chaves prefixadas por vendor para evitar mistura no ThingsBoard
-            if (strcmp(vendor, "minew") == 0) {
-                doc["x_minew"] = roundf(x * 1000) / 1000;
-                doc["y_minew"] = roundf(y * 1000) / 1000;
-                doc["z_minew"] = roundf(z * 1000) / 1000;
-            } else if (strcmp(vendor, "moko") == 0) {
-                doc["x_moko"] = roundf(x * 1000) / 1000;
-                doc["y_moko"] = roundf(y * 1000) / 1000;
-                doc["z_moko"] = roundf(z * 1000) / 1000;
-            } else {
-                doc["x"] = roundf(x * 1000) / 1000;
-                doc["y"] = roundf(y * 1000) / 1000;
-                doc["z"] = roundf(z * 1000) / 1000;
-            }
-            
+            doc["x"] = roundf(x * 1000) / 1000;
+            doc["y"] = roundf(y * 1000) / 1000;
+            doc["z"] = roundf(z * 1000) / 1000;
             doc["rssi"] = rssi;
-            doc["deviceType"] = deviceType;
             doc["ts"] = connect->getEpochMillis();
             
             size_t written = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
@@ -285,6 +297,8 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
                 } else {
                     Serial.println("❌ Falha ao enviar dados de acelerômetro");
                 }
+            } else {
+                Serial.printf("❌ JSON serialization failed: written=%u, bufsize=%u\n", written, sizeof(jsonBuf));
             }
         }
     }
@@ -297,100 +311,132 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
         return;
 
     Serial.printf("Devices Found: %d\n", maxDevices);
+    
+    // 🔍 PROCURAR O DISPOSITIVO ALVO PRIMEIRO (com proteção)
+    const String TARGET_MAC = "E4:1E:F1:8C:59:5C";
+    bool targetFound = false;
+    int targetIndex = -1;
+    
+    // Limitar busca para evitar crashes
+    int searchLimit = min(maxDevices, 100);
+    
+    // Buscar o dispositivo alvo na lista
+    for (int i = 0; i < searchLimit; i++) {
+        try {
+            BLEAdvertisedDevice dev = foundDevices.getDevice(i);
+            String mac = dev.getAddress().toString();
+            mac.toUpperCase();
+            if (mac == TARGET_MAC) {
+                targetFound = true;
+                targetIndex = i;
+                Serial.printf("✅ Dispositivo alvo encontrado! MAC: %s (índice %d/%d)\n", mac.c_str(), i, maxDevices);
+                break;
+            }
+        } catch (...) {
+            continue;  // Ignora dispositivos problemáticos
+        }
+    }
+    
+    if (!targetFound) {
+        Serial.printf("⚠️  Dispositivo %s NÃO ENCONTRADO entre os %d dispositivos\n", TARGET_MAC.c_str(), maxDevices);
+        return;  // Sair se não encontrou o dispositivo alvo
+    }
 
-    const int accelLimit = 60;
+    // Processar APENAS o dispositivo alvo
+    const int accelLimit = 30;
     int accelProcessed = 0;
 
-    for (int i = 0; i < maxDevices; i++)
+    try
     {
-        try
+        BLEAdvertisedDevice advertisedDevice = foundDevices.getDevice(targetIndex);
+
+        // ✅ MAC: Use API directly - returns String (Arduino)
+        String macStr = advertisedDevice.getAddress().toString();
+        macStr.toUpperCase();
+        
+        Serial.printf("🎯 Processando dispositivo: %s\n", macStr.c_str());
+        
+        setMacAddress(macStr.c_str());
+        setRssi(advertisedDevice.getRSSI());
+
+        // ✅ Only process if has Service Data
+        if (!advertisedDevice.haveServiceData())
         {
-            BLEAdvertisedDevice advertisedDevice = foundDevices.getDevice(i);
+            Serial.println("❌ Dispositivo não tem Service Data");
+            return;
+        }
 
-            // ✅ MAC: Use API directly - returns String (Arduino)
-            String macStr = advertisedDevice.getAddress().toString();
-            macStr.toUpperCase();
-            setMacAddress(macStr.c_str());
+        BLEUUID serviceUUID = advertisedDevice.getServiceDataUUID();
+        Serial.printf("📡 Service UUID: %s\n", serviceUUID.toString().c_str());
 
-            setRssi(advertisedDevice.getRSSI());
+        // ✅ Service Data BINARY (correct way - String from Arduino lib)
+        String sd = advertisedDevice.getServiceData();
+        size_t len = sd.length();
+        
+        Serial.printf("📦 Service Data length: %d bytes\n", len);
+        
+        if (!len || len > 64)
+        {
+            Serial.printf("❌ Service Data length inválido: %d\n", len);
+            return;
+        }
+        
+        // 🔧 CRITICAL: Copy binary data to local buffer IMMEDIATELY
+        uint8_t data[64];
+        memcpy(data, sd.c_str(), len);
 
-            // ✅ Only process if has Service Data
-            if (!advertisedDevice.haveServiceData())
+        // ✅ Match against table
+        for (const mapData &item : list)
+        {
+            if (!serviceUUID.equals(BLEUUID((uint16_t)item.uuid)))
             {
                 continue;
             }
-
-            BLEUUID serviceUUID = advertisedDevice.getServiceDataUUID();
-
-            // ✅ Service Data BINARY (correct way - String from Arduino lib)
-            String sd = advertisedDevice.getServiceData();
-            size_t len = sd.length();
             
-            if (!len || len > 64)
-            {
-                // 64 is reasonable limit to avoid garbage; adjust if needed
-                continue;
-            }
-            
-            // 🔧 CRITICAL: Copy binary data to local buffer IMMEDIATELY
-            // (String.c_str() pointer becomes invalid after String lifecycle ends)
-            uint8_t data[64];
-            memcpy(data, sd.c_str(), len);
+            Serial.printf("✅ UUID Match! 0x%04X\n", item.uuid);
 
-            // ✅ Match against table
-            for (const mapData &item : list)
+            // If accelerometer (Minew/Moko): validate type and minimum size by offsets
+            if (!item.offset.empty())
             {
-
-                if (!serviceUUID.equals(BLEUUID((uint16_t)item.uuid)))
+                if (accelProcessed >= accelLimit)
                 {
                     continue;
                 }
 
-                // If accelerometer (Minew/Moko): validate type and minimum size by offsets
-                if (!item.offset.empty())
+                if (len < 1)
+                    continue;
+
+                if (data[0] != item.type)
                 {
-                    if (accelProcessed >= accelLimit)
-                    {
-                        continue;
-                    }
-
-                    if (len < 1)
-                        continue;
-
-                    if (data[0] != item.type)
-                    {
-                        continue;
-                    }
-
-                    size_t minRequired = (size_t)(*std::max_element(item.offset.begin(), item.offset.end()) + 1);
-                    if (len < minRequired)
-                    {
-                        continue;
-                    }
-
-                    // Safe cast (processAccelerometer expects uint8_t*)
-                    processAccelerometer((uint8_t *)data, len, item.offset);
-                    accelProcessed++;
-
+                    Serial.printf("❌ Type mismatch: expected 0x%02X, got 0x%02X\n", item.type, data[0]);
+                    continue;
                 }
-                else
+
+                size_t minRequired = (size_t)(*std::max_element(item.offset.begin(), item.offset.end()) + 1);
+                if (len < minRequired)
                 {
-                    // Telemetry (Eddystone TLM normally 0x20, with 14 bytes)
-                    if (len >= 14)
-                    {
-                        processTelemetry((uint8_t *)data, len);
-                    }
+                    Serial.printf("❌ Data too short: need %d, got %d\n", minRequired, len);
+                    continue;
+                }
+
+                Serial.println("🚀 Processando acelerómetro...");
+                processAccelerometer((uint8_t *)data, len, item.offset);
+                accelProcessed++;
+            }
+            else
+            {
+                // Telemetry (Eddystone TLM normally 0x20, with 14 bytes)
+                if (len >= 14)
+                {
+                    Serial.println("🚀 Processando telemetria...");
+                    processTelemetry((uint8_t *)data, len);
                 }
             }
         }
-        catch (...)
-        {
-            continue;
-        }
     }
-    if (accelProcessed >= accelLimit)
+    catch (...)
     {
-        Serial.printf("⚠️  Accelerometer limit atingido (%d). Aguardando próximo ciclo.\n", accelLimit);
+        Serial.println("❌ Exceção ao processar dispositivo");
     }
 
     Serial.printf("✅ ListDevices() completou com sucesso!\n");

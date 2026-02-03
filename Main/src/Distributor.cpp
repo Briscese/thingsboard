@@ -3,11 +3,12 @@
 #include "Advertisements.h"
 #include "Connect.h"
 #include "config/Config.h"
+#include <ArduinoJson.h>
 
 extern Connect* connect;
 
 const int SCAN_INTERVAL = 3000;
-const int TIME_MEDIA = 100000;
+const int TIME_MEDIA = 30000;  // 30 segundos - garante tempo para acumular 3+ leituras (scans a cada 3s)
 
 Distributor::Distributor(std::vector<User>& users, BLEScan* pBLEScan, String api_url) 
     : users(users),
@@ -123,6 +124,38 @@ int Distributor::findUser(const String& id) {
         }
     }
     return -1;
+}
+
+// Validar se o deviceCode corresponde aos últimos 4 caracteres do MAC address
+bool Distributor::validateDeviceCodeWithMAC(const String& deviceCode, const String& macAddress) {
+    if (deviceCode.length() < 4 || macAddress.length() < 2) {
+        return false;
+    }
+    
+    // Extrair últimos 4 caracteres do MAC (sem os ":")
+    // Exemplo: macAddress = "84:CC:A8:2C:72:30" -> extrair "72:30" -> "7230"
+    String macLast4 = macAddress.substring(macAddress.length() - 5);
+    String macClean = "";
+    for (int i = 0; i < macLast4.length(); i++) {
+        if (macLast4[i] != ':') {
+            macClean += macLast4[i];
+        }
+    }
+    macClean.toUpperCase();
+    
+    // Extrair últimos 4 caracteres do código (ex: "Card_595C" -> "595C")
+    String codeClean = deviceCode.substring(deviceCode.length() - 4);
+    codeClean.toUpperCase();
+    
+    Serial.printf("🔍 Validando - Code: %s | MAC (últimos 4): %s\n", codeClean.c_str(), macClean.c_str());
+    
+    if (macClean == codeClean) {
+        Serial.println("✓ DeviceCode VÁLIDO - Corresponde ao MAC!");
+        return true;
+    } else {
+        Serial.printf("✗ AVISO: DeviceCode NÃO corresponde ao MAC! Pulando envio...\n");
+        return false;
+    }
 }
 
 void Distributor::UserRegisterData(const std::string& macAddress, const std::string& code, int rssiBLE, 
@@ -262,6 +295,7 @@ void Distributor::process()
             Serial.println("\n-----------------------User postIn---------------------------");
             Serial.printf("\nDevice: %s\n", users[i].getId().c_str());
             Serial.printf("\nSending...(%d)\n", i+1);
+            Serial.printf("📊 Leituras RSSI acumuladas: %d/3 (mínimo necessário)\n", users[i].getMediasRssi().size());
 
             loggedIn(i);
             if (users[i].isLoggedIn())
@@ -271,10 +305,41 @@ void Distributor::process()
                 users[i].clearMediasRssi();
                 users[i].incrementVezes();
                 
-                postIn(users[i].getId(), mode, users[i].getTempo(), users[i].getMac(), 
-                      users[i].getDeviceTypeUser(), users[i].getBatteryLevel(), 
-                      users[i].getX(), users[i].getY(), users[i].getZ(), 
-                      users[i].getTimeActivity(), users[i].getName(), mode, distance);
+                // MQTT-only: publish PostIn event to ThingsBoard
+                // VALIDAR se o deviceCode corresponde ao MAC antes de enviar
+                if (connect != nullptr) {
+                    String deviceCode = "Card_" + users[i].getId();
+                    String macAddress = users[i].getMac().c_str();
+                    
+                    // Validar correspondência entre código e MAC
+                    if (!validateDeviceCodeWithMAC(deviceCode, macAddress)) {
+                        Serial.printf("⚠️ SALTANDO envio - DeviceCode não corresponde ao MAC: %s != %s\n", 
+                                    deviceCode.c_str(), macAddress.c_str());
+                        continue; // Pular para o próximo usuário
+                    }
+                    
+                    DynamicJsonDocument doc(512);
+                    doc["messageType"] = "postin";
+                    doc["gatewayId"] = DEVICE_ID;
+                    doc["deviceId"] = users[i].getId();
+                    doc["mac"] = users[i].getMac();
+                    doc["sinalPower"] = mode;
+                    doc["deviceType"] = users[i].getDeviceTypeUser();
+                    doc["batteryLevel"] = users[i].getBatteryLevel();
+                    doc["timeInOut"] = connect->getTime();
+                    doc["timeInOutUser"] = users[i].getTempo();
+                    doc["x"] = users[i].getX();
+                    doc["y"] = users[i].getY();
+                    doc["z"] = users[i].getZ();
+                    doc["timeActivity"] = users[i].getTimeActivity();
+                    doc["name"] = users[i].getName();
+                    doc["distance"] = distance;
+                    doc["ts"] = connect->getEpochMillis();
+
+                    String jsonData;
+                    serializeJson(doc, jsonData);
+                    connect->publishTelemetry(jsonData);
+                }
                 delay(100);
             }
         }
