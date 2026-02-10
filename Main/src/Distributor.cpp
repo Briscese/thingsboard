@@ -4,6 +4,7 @@
 #include "Connect.h"
 #include "config/Config.h"
 #include <ArduinoJson.h>
+#include <WiFi.h>
 
 extern Connect* connect;
 
@@ -27,49 +28,50 @@ double CalculateDistance(double signalPower)
   if (signalPower == 0) 
     return 0.0;
 
-  const double n = 2.8; 
-  const double A = -60;
+  const double n = 3.2;   // Propagação do sinal (quanto maior, mais distância)
+  const double A = -55;   // RSSI de referência a 1 metro (menor valor = mais distância)
   double B = 0.0;
 
+  // Ajustes de calibração AUMENTADOS para dar mais distância
   switch ((int)signalPower) {
     case -90 ... -86:
-      B = 5.5;
+      B = 8.0;  // Aumentado
       break;
     case -85 ... -83:
-      B = 5.2;
+      B = 7.5;  // Aumentado
       break;
     case -82 ... -81:
-      B = 5.0;
+      B = 7.0;  // Aumentado
       break;
     case -80 ... -78:
-      B = 4.8;
+      B = 6.5;  // Aumentado
       break;
     case -77 ... -76:
-      B = 4.5;
+      B = 6.0;  // Aumentado
       break;
     case -75 ... -73:
-      B = 4.2;
+      B = 5.5;  // Aumentado
       break;
     case -72 ... -71:
-      B = 4.0;
+      B = 5.0;  // Aumentado
       break;
     case -69 ... -67:
-      B = 3.2;
+      B = 4.5;  // Aumentado
       break;
     case -66 ... -65:
-      B = 2.8;
+      B = 4.0;  // Aumentado
       break;
     case -64:
-      B = 2.5;
+      B = 3.5;  // Aumentado
       break;
     case -63:
-      B = 2.0;
+      B = 3.0;  // Aumentado
       break;
     case -62:
-      B = 1.5;
+      B = 2.5;  // Aumentado
       break;
     case -61:
-      B = 1.0;
+      B = 2.0;  // Aumentado
       break;
     default:
       B = 0.0;
@@ -102,6 +104,66 @@ int CalculateMode(const std::vector<int>& numbers) {
     }
 
     return mostRepeated;
+}
+
+// ============================================================
+// FUNÇÕES DE GEOLOCALIZAÇÃO
+// ============================================================
+
+/**
+ * Estima um ângulo (em graus) baseado no RSSI para simular direção do beacon
+ * Em uma implementação real, você poderia usar múltiplos gateways ou antenas 
+ * para triangulação. Aqui, usamos o RSSI como base para variação angular.
+ */
+double Distributor::estimateAngleFromRSSI(int rssi) {
+    // Usa o RSSI para criar variação no ângulo (0-360 graus)
+    // Quanto mais forte o sinal (RSSI mais próximo de 0), mais próximo de norte (0°)
+    // Sinais fracos distribuem em outras direções
+    
+    // Normalizar RSSI (-90 a -40) para (0 a 360 graus)
+    double normalized = ((rssi + 90.0) / 50.0) * 360.0;
+    
+    // Garantir que está entre 0-360
+    if (normalized < 0) normalized = 0;
+    if (normalized > 360) normalized = 360;
+    
+    return normalized;
+}
+
+/**
+ * Calcula latitude e longitude estimada do beacon baseado na distância e RSSI
+ * Usa a localização fixa do gateway como referência
+ * 
+ * @param distance Distância em metros calculada a partir do RSSI
+ * @param rssi Valor do RSSI em dBm
+ * @param latitude (OUT) Latitude calculada do beacon
+ * @param longitude (OUT) Longitude calculada do beacon
+ */
+void Distributor::calculateBeaconLocation(double distance, int rssi, double& latitude, double& longitude) {
+    // Localização fixa do gateway (definida em Config.h)
+    double gatewayLat = GATEWAY_LATITUDE;
+    double gatewayLon = GATEWAY_LONGITUDE;
+    
+    // Estimar ângulo baseado no RSSI (em graus)
+    double angle = estimateAngleFromRSSI(rssi);
+    
+    // Converter ângulo para radianos
+    double angleRad = angle * (M_PI / 180.0);
+    
+    // Raio da Terra em metros
+    const double EARTH_RADIUS = 6371000.0;
+    
+    // Calcular deslocamento em latitude e longitude
+    // Fórmula simplificada para distâncias curtas (< 100m)
+    double deltaLat = (distance * cos(angleRad)) / EARTH_RADIUS * (180.0 / M_PI);
+    double deltaLon = (distance * sin(angleRad)) / (EARTH_RADIUS * cos(gatewayLat * M_PI / 180.0)) * (180.0 / M_PI);
+    
+    // Calcular posição final do beacon
+    latitude = gatewayLat + deltaLat;
+    longitude = gatewayLon + deltaLon;
+    
+    Serial.printf("📍 Geolocalização - Gateway: (%.6f, %.6f) | Distância: %.2fm | Ângulo: %.1f° | Beacon: (%.6f, %.6f)\n",
+                  gatewayLat, gatewayLon, distance, angle, latitude, longitude);
 }
 
 void Distributor::loggedIn(int pos) {
@@ -305,17 +367,73 @@ void Distributor::process()
                 users[i].clearMediasRssi();
                 users[i].incrementVezes();
                 
-                // MQTT-only: publish PostIn event to ThingsBoard
-                // VALIDAR se o deviceCode corresponde ao MAC antes de enviar
-                if (connect != nullptr) {
+                // Calcular localização do beacon (se habilitado)
+                double beaconLat = 0.0;
+                double beaconLon = 0.0;
+                if (ENABLE_GEOLOCATION) {
+                    calculateBeaconLocation(distance, mode, beaconLat, beaconLon);
+                }
+                
+                // MQTT: Enviar dados simplificados (flat) para ThingsBoard
+                if (connect != nullptr && ENABLE_GEOLOCATION) {
+                    DynamicJsonDocument doc(512);
+                    
+                    // Campos principais
+                    doc["messageType"] = "postin";  // Para filtro do ThingsBoard
+                    doc["type"] = "geoposition";    // Para processar geofences
+                    doc["deviceId"] = DEVICE_ID;
+                    doc["objectId"] = users[i].getMac();
+                    
+                    // Coordenadas
+                    doc["lat"] = beaconLat;
+                    doc["lng"] = beaconLon;
+                    
+                    // Dados do sensor
+                    if (users[i].getBatteryLevel() > 0) {
+                        doc["battery"] = users[i].getBatteryLevel();
+                    }
+                    
+                    float tempX = users[i].getX();
+                    float tempY = users[i].getY();
+                    float tempZ = users[i].getZ();
+                    
+                    if (tempX != 0 || tempY != 0 || tempZ != 0) {
+                        doc["accelerometerX"] = tempX;
+                        doc["accelerometerY"] = tempY;
+                        doc["accelerometerZ"] = tempZ;
+                    }
+                    
+                    // Accuracy estimada
+                    float accuracy = distance * 0.5;
+                    if (accuracy < 2.0) accuracy = 2.0;
+                    if (accuracy > 20.0) accuracy = 20.0;
+                    doc["accuracy"] = accuracy;
+                    
+                    doc["signalPower"] = mode;
+                    doc["distance"] = distance;
+                    
+                    // Metadados do ESP32
+                    doc["espFirmwareVersion"] = FIRMWARE_VERSION;
+                    doc["signalStrength"] = WiFi.RSSI();
+                    doc["timestamp"] = connect->getEpochMillis();
+                    
+                    String jsonData;
+                    serializeJson(doc, jsonData);
+                    
+                    Serial.println("\n📡 Enviando dados de localização:");
+                    Serial.println(jsonData);
+                    
+                    connect->publishTelemetry(jsonData);
+                }
+                else if (connect != nullptr && !ENABLE_GEOLOCATION) {
+                    // Formato antigo se geolocalização estiver desabilitada
                     String deviceCode = "Card_" + users[i].getId();
                     String macAddress = users[i].getMac().c_str();
                     
-                    // Validar correspondência entre código e MAC
                     if (!validateDeviceCodeWithMAC(deviceCode, macAddress)) {
                         Serial.printf("⚠️ SALTANDO envio - DeviceCode não corresponde ao MAC: %s != %s\n", 
                                     deviceCode.c_str(), macAddress.c_str());
-                        continue; // Pular para o próximo usuário
+                        continue;
                     }
                     
                     DynamicJsonDocument doc(512);
@@ -324,15 +442,7 @@ void Distributor::process()
                     doc["deviceId"] = users[i].getId();
                     doc["mac"] = users[i].getMac();
                     doc["sinalPower"] = mode;
-                    doc["deviceType"] = users[i].getDeviceTypeUser();
                     doc["batteryLevel"] = users[i].getBatteryLevel();
-                    doc["timeInOut"] = connect->getTime();
-                    doc["timeInOutUser"] = users[i].getTempo();
-                    doc["x"] = users[i].getX();
-                    doc["y"] = users[i].getY();
-                    doc["z"] = users[i].getZ();
-                    doc["timeActivity"] = users[i].getTimeActivity();
-                    doc["name"] = users[i].getName();
                     doc["distance"] = distance;
                     doc["ts"] = connect->getEpochMillis();
 

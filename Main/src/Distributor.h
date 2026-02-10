@@ -35,6 +35,10 @@ public:
                float timeActivity, String name, int mode, double distance);
     void sendDataToThingsBoard(User& user);  // Novo método para MQTT
     
+    // Funções de Geolocalização
+    void calculateBeaconLocation(double distance, int rssi, double& latitude, double& longitude);
+    double estimateAngleFromRSSI(int rssi);
+    
     bool isSending() const { return sending; }
     void setSending(bool value) { sending = value; }
     void setInicioMedia(unsigned long value) { inicioMedia = value; }

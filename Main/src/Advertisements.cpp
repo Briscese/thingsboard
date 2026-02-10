@@ -5,6 +5,7 @@
 #include <BLEAdvertisedDevice.h>
 #include <BLEBeacon.h>
 #include <Arduino.h>
+#include <WiFi.h>
 #include "Distributor.h"
 #include "Connect.h"
 #include "config/Config.h"
@@ -272,33 +273,90 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
     if (distributor != nullptr) {
         distributor->UserRegisterData(macAddress.c_str(), deviceCode.c_str(), rssi, deviceType, batteryLevel, x, y, z, timeActivity, name);
         
-        // 📡 Enviar dados de acelerômetro para ThingsBoard imediatamente
-        if (connect != nullptr && connect->isMQTTConnected()) {
-            static DynamicJsonDocument doc(512);
-            static char jsonBuf[512];
-            doc.clear();
-
-            // Campos necessários para a rule chain processar corretamente
-            doc["messageType"] = "accelerometer";
-            doc["deviceId"] = macAddress.c_str();
-            doc["mac"] = macAddress.c_str();
-            doc["battery"] = batteryLevel;
-            doc["x"] = roundf(x * 1000) / 1000;
-            doc["y"] = roundf(y * 1000) / 1000;
-            doc["z"] = roundf(z * 1000) / 1000;
-            doc["rssi"] = rssi;
-            doc["ts"] = connect->getEpochMillis();
+        // 📡 Enviar dados de acelerômetro para ThingsBoard no NOVO FORMATO
+        if (connect != nullptr && connect->isMQTTConnected() && ENABLE_GEOLOCATION) {
+            // Calcular distância baseada no RSSI (parâmetros corrigidos para AUMENTAR distância)
+            double distance = 0.0;
+            const double n = 3.2;   // Propagação do sinal
+            const double A = -55;   // RSSI de referência
+            double B = 0.0;
             
-            size_t written = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
-            if (written > 0 && written < sizeof(jsonBuf)) {
-                connect->loopMQTT();
-                if (connect->publishTelemetryRaw(jsonBuf, written)) {
-                    Serial.printf("✅ Acelerometro enviado: %s\n", jsonBuf);
-                } else {
-                    Serial.println("❌ Falha ao enviar dados de acelerômetro");
-                }
+            int signalPower = rssi;
+            switch (signalPower) {
+                case -90 ... -86: B = 8.0; break;
+                case -85 ... -83: B = 7.5; break;
+                case -82 ... -81: B = 7.0; break;
+                case -80 ... -78: B = 6.5; break;
+                case -77 ... -76: B = 6.0; break;
+                case -75 ... -73: B = 5.5; break;
+                case -72 ... -71: B = 5.0; break;
+                case -69 ... -67: B = 4.5; break;
+                case -66 ... -65: B = 4.0; break;
+                case -64: B = 3.5; break;
+                case -63: B = 3.0; break;
+                case -62: B = 2.5; break;
+                case -61: B = 2.0; break;
+                default: B = 0.0; break;
+            }
+            distance = pow(10, (A - signalPower) / (10 * n)) + B;
+            
+            // Calcular ângulo e posição do beacon
+            double normalized = ((rssi + 90.0) / 50.0) * 360.0;
+            if (normalized < 0) normalized = 0;
+            if (normalized > 360) normalized = 360;
+            double angleRad = normalized * (M_PI / 180.0);
+            
+            const double EARTH_RADIUS = 6371000.0;
+            double deltaLat = (distance * cos(angleRad)) / EARTH_RADIUS * (180.0 / M_PI);
+            double deltaLon = (distance * sin(angleRad)) / (EARTH_RADIUS * cos(GATEWAY_LATITUDE * M_PI / 180.0)) * (180.0 / M_PI);
+            
+            double beaconLat = GATEWAY_LATITUDE + deltaLat;
+            double beaconLon = GATEWAY_LONGITUDE + deltaLon;
+            
+            // Calcular accuracy
+            float accuracy = distance * 0.5;
+            if (accuracy < 2.0) accuracy = 2.0;
+            if (accuracy > 20.0) accuracy = 20.0;
+            
+            // Criar JSON simplificado (flat) para ThingsBoard processar
+            DynamicJsonDocument doc(512);
+            
+            // Campos principais
+            doc["messageType"] = "postin";  // Para filtro do ThingsBoard
+            doc["type"] = "geoposition";      // Para processar geofences
+            doc["deviceId"] = DEVICE_ID;
+            doc["objectId"] = macAddress.c_str();
+            
+            // Coordenadas
+            doc["lat"] = beaconLat;
+            doc["lng"] = beaconLon;
+            
+            // Dados do sensor
+            if (batteryLevel > 0) {
+                doc["battery"] = batteryLevel;
+            }
+            doc["accelerometerX"] = roundf(x * 1000) / 1000;
+            doc["accelerometerY"] = roundf(y * 1000) / 1000;
+            doc["accelerometerZ"] = roundf(z * 1000) / 1000;
+            doc["accuracy"] = accuracy;
+            doc["signalPower"] = rssi;
+            doc["distance"] = distance;
+            
+            // Metadados do ESP32
+            doc["espFirmwareVersion"] = FIRMWARE_VERSION;
+            doc["signalStrength"] = WiFi.RSSI();
+            doc["timestamp"] = connect->getEpochMillis();
+            
+            String jsonData;
+            serializeJson(doc, jsonData);
+            
+            Serial.println("\n📡 Enviando acelerômetro com geolocalização:");
+            Serial.println(jsonData);
+            
+            if (connect->publishTelemetry(jsonData)) {
+                Serial.println("✅ Dados enviados com sucesso!");
             } else {
-                Serial.printf("❌ JSON serialization failed: written=%u, bufsize=%u\n", written, sizeof(jsonBuf));
+                Serial.println("❌ Falha ao enviar dados");
             }
         }
     }
