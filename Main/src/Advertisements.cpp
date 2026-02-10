@@ -206,13 +206,7 @@ void Advertisements::processTelemetry(uint8_t *data, size_t len)
         size_t written = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
         if (written > 0 && written < sizeof(jsonBuf)) {
             connect->loopMQTT();
-            if (connect->publishTelemetryRaw(jsonBuf, written)) {
-                Serial.printf("✅ Telemetria enviada: %s\n", jsonBuf);
-            } else {
-                Serial.println("❌ Falha ao enviar dados de telemetria");
-            }
-        } else {
-            Serial.printf("❌ JSON serialization failed: written=%u, bufsize=%u\n", written, sizeof(jsonBuf));
+            connect->publishTelemetryRaw(jsonBuf, written);
         }
     }
 }
@@ -229,7 +223,6 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
     {
         if (offset[i] < 0 || offset[i] >= (int)len)
         {
-            Serial.printf("❌ Invalid offset[%d]=%d for len=%u\n", i, offset[i], len);
             return;
         }
     }
@@ -275,28 +268,18 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
         
         // 📡 Enviar dados de acelerômetro para ThingsBoard no NOVO FORMATO
         if (connect != nullptr && connect->isMQTTConnected() && ENABLE_GEOLOCATION) {
-            // Calcular distância baseada no RSSI (parâmetros corrigidos para AUMENTAR distância)
+            // Calcular distância baseada no RSSI (calibrado para Beacon M2)
             double distance = 0.0;
-            const double n = 3.2;   // Propagação do sinal
-            const double A = -55;   // RSSI de referência
+            const double n = 2.0;   // Refinado com dados até 10m
+            const double A = -60;   // Refinado
             double B = 0.0;
             
-            int signalPower = rssi;
-            switch (signalPower) {
-                case -90 ... -86: B = 8.0; break;
-                case -85 ... -83: B = 7.5; break;
-                case -82 ... -81: B = 7.0; break;
-                case -80 ... -78: B = 6.5; break;
-                case -77 ... -76: B = 6.0; break;
-                case -75 ... -73: B = 5.5; break;
-                case -72 ... -71: B = 5.0; break;
-                case -69 ... -67: B = 4.5; break;
-                case -66 ... -65: B = 4.0; break;
-                case -64: B = 3.5; break;
-                case -63: B = 3.0; break;
-                case -62: B = 2.5; break;
-                case -61: B = 2.0; break;
-                default: B = 0.0; break;
+            int signalPower=rssi;
+            switch(signalPower){
+                case -90 ... -88:B=2.5;break;case -87 ... -85:B=2.1;break;case -84 ... -82:B=1.6;break;
+                case -81 ... -79:B=1.1;break;case -78 ... -76:B=0.7;break;case -75 ... -73:B=0.5;break;
+                case -72 ... -70:B=0.2;break;case -69 ... -67:B=0.0;break;case -66 ... -64:B=0.0;break;
+                default:B=0.0;
             }
             distance = pow(10, (A - signalPower) / (10 * n)) + B;
             
@@ -350,13 +333,7 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
             String jsonData;
             serializeJson(doc, jsonData);
             
-            Serial.println("\n📡 Enviando acelerômetro com geolocalização:");
-            Serial.println(jsonData);
-            
             if (connect->publishTelemetry(jsonData)) {
-                Serial.println("✅ Dados enviados com sucesso!");
-            } else {
-                Serial.println("❌ Falha ao enviar dados");
             }
         }
     }
@@ -367,8 +344,6 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
     int maxDevices = foundDevices.getCount();
     if (maxDevices <= 0)
         return;
-
-    Serial.printf("Devices Found: %d\n", maxDevices);
     
     // 🔍 PROCURAR O DISPOSITIVO ALVO PRIMEIRO (com proteção)
     const String TARGET_MAC = "E4:1E:F1:8C:59:5C";
@@ -387,7 +362,6 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
             if (mac == TARGET_MAC) {
                 targetFound = true;
                 targetIndex = i;
-                Serial.printf("✅ Dispositivo alvo encontrado! MAC: %s (índice %d/%d)\n", mac.c_str(), i, maxDevices);
                 break;
             }
         } catch (...) {
@@ -396,7 +370,6 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
     }
     
     if (!targetFound) {
-        Serial.printf("⚠️  Dispositivo %s NÃO ENCONTRADO entre os %d dispositivos\n", TARGET_MAC.c_str(), maxDevices);
         return;  // Sair se não encontrou o dispositivo alvo
     }
 
@@ -412,30 +385,23 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
         String macStr = advertisedDevice.getAddress().toString();
         macStr.toUpperCase();
         
-        Serial.printf("🎯 Processando dispositivo: %s\n", macStr.c_str());
-        
         setMacAddress(macStr.c_str());
         setRssi(advertisedDevice.getRSSI());
 
         // ✅ Only process if has Service Data
         if (!advertisedDevice.haveServiceData())
         {
-            Serial.println("❌ Dispositivo não tem Service Data");
             return;
         }
 
         BLEUUID serviceUUID = advertisedDevice.getServiceDataUUID();
-        Serial.printf("📡 Service UUID: %s\n", serviceUUID.toString().c_str());
 
         // ✅ Service Data BINARY (correct way - String from Arduino lib)
         String sd = advertisedDevice.getServiceData();
         size_t len = sd.length();
         
-        Serial.printf("📦 Service Data length: %d bytes\n", len);
-        
         if (!len || len > 64)
         {
-            Serial.printf("❌ Service Data length inválido: %d\n", len);
             return;
         }
         
@@ -451,7 +417,7 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
                 continue;
             }
             
-            Serial.printf("✅ UUID Match! 0x%04X\n", item.uuid);
+            // Processando UUID válido
 
             // If accelerometer (Minew/Moko): validate type and minimum size by offsets
             if (!item.offset.empty())
@@ -466,18 +432,15 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
 
                 if (data[0] != item.type)
                 {
-                    Serial.printf("❌ Type mismatch: expected 0x%02X, got 0x%02X\n", item.type, data[0]);
                     continue;
                 }
 
                 size_t minRequired = (size_t)(*std::max_element(item.offset.begin(), item.offset.end()) + 1);
                 if (len < minRequired)
                 {
-                    Serial.printf("❌ Data too short: need %d, got %d\n", minRequired, len);
                     continue;
                 }
 
-                Serial.println("🚀 Processando acelerómetro...");
                 processAccelerometer((uint8_t *)data, len, item.offset);
                 accelProcessed++;
             }
@@ -486,7 +449,6 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
                 // Telemetry (Eddystone TLM normally 0x20, with 14 bytes)
                 if (len >= 14)
                 {
-                    Serial.println("🚀 Processando telemetria...");
                     processTelemetry((uint8_t *)data, len);
                 }
             }
@@ -494,8 +456,5 @@ void Advertisements::ListDevices(BLEScanResults foundDevices)
     }
     catch (...)
     {
-        Serial.println("❌ Exceção ao processar dispositivo");
     }
-
-    Serial.printf("✅ ListDevices() completou com sucesso!\n");
 }

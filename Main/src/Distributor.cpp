@@ -23,55 +23,37 @@ Distributor::Distributor(std::vector<User>& users, BLEScan* pBLEScan, String api
 {
 }
 
-double CalculateDistance(double signalPower)
-{
-  if (signalPower == 0) 
-    return 0.0;
-
-  const double n = 3.2;   // Propagação do sinal (quanto maior, mais distância)
-  const double A = -55;   // RSSI de referência a 1 metro (menor valor = mais distância)
-  double B = 0.0;
-
-  // Ajustes de calibração AUMENTADOS para dar mais distância
-  switch ((int)signalPower) {
-    case -90 ... -86:
-      B = 8.0;  // Aumentado
+double CalculateDistance(double signalPower){
+  if(signalPower==0)return 0.0;
+  const double n=2.0,A=-60;
+  double B=0.0;
+  switch((int)signalPower){
+    case -90 ... -88:
+      B = 2.5;  // 10m+
       break;
-    case -85 ... -83:
-      B = 7.5;  // Aumentado
+    case -87 ... -85:
+      B = 2.1;  // 8-10m (suavizado)
       break;
-    case -82 ... -81:
-      B = 7.0;  // Aumentado
+    case -84 ... -82:
+      B = 1.6;  // 5-7m (reduzido para suavizar transição)
       break;
-    case -80 ... -78:
-      B = 6.5;  // Aumentado
+    case -81 ... -79:
+      B = 1.1;  // 3-5m (reduzido para pular 2m)
       break;
-    case -77 ... -76:
-      B = 6.0;  // Aumentado
+    case -78 ... -76:
+      B = 0.7;  // 2.5-3m (reduzido para suavizar)
       break;
     case -75 ... -73:
-      B = 5.5;  // Aumentado
+      B = 0.5;  // ~3m (região 3m limpa)
       break;
-    case -72 ... -71:
-      B = 5.0;  // Aumentado
+    case -72 ... -70:
+      B = 0.2;  // 1-2m (suavizado)
       break;
     case -69 ... -67:
-      B = 4.5;  // Aumentado
+      B = 0.0;  // ~1m (região 1m limpa)
       break;
-    case -66 ... -65:
-      B = 4.0;  // Aumentado
-      break;
-    case -64:
-      B = 3.5;  // Aumentado
-      break;
-    case -63:
-      B = 3.0;  // Aumentado
-      break;
-    case -62:
-      B = 2.5;  // Aumentado
-      break;
-    case -61:
-      B = 2.0;  // Aumentado
+    case -66 ... -64:
+      B = 0.0;  // ~1m
       break;
     default:
       B = 0.0;
@@ -161,19 +143,13 @@ void Distributor::calculateBeaconLocation(double distance, int rssi, double& lat
     // Calcular posição final do beacon
     latitude = gatewayLat + deltaLat;
     longitude = gatewayLon + deltaLon;
-    
-    Serial.printf("📍 Geolocalização - Gateway: (%.6f, %.6f) | Distância: %.2fm | Ângulo: %.1f° | Beacon: (%.6f, %.6f)\n",
-                  gatewayLat, gatewayLon, distance, angle, latitude, longitude);
 }
 
 void Distributor::loggedIn(int pos) {
   if (users[pos].getMediasRssi().size() >= 3) {
     users[pos].setLoggedIn(true);
-    Serial.print("Device loggedIn: ");
-    Serial.println(users[pos].getMediasRssi().size());
   }
   else {
-    Serial.println("Device NOT loggedIn: Minimum (3)");
     users[pos].setLoggedIn(false);
     users[pos].setVezes(0);
   }
@@ -209,13 +185,9 @@ bool Distributor::validateDeviceCodeWithMAC(const String& deviceCode, const Stri
     String codeClean = deviceCode.substring(deviceCode.length() - 4);
     codeClean.toUpperCase();
     
-    Serial.printf("🔍 Validando - Code: %s | MAC (últimos 4): %s\n", codeClean.c_str(), macClean.c_str());
-    
     if (macClean == codeClean) {
-        Serial.println("✓ DeviceCode VÁLIDO - Corresponde ao MAC!");
         return true;
     } else {
-        Serial.printf("✗ AVISO: DeviceCode NÃO corresponde ao MAC! Pulando envio...\n");
         return false;
     }
 }
@@ -268,26 +240,6 @@ void Distributor::UserRegisterData(const std::string& macAddress, const std::str
 void Distributor::postIn(String userId, int media, String tempo, String mac, 
                     int deviceType, int batteryLevel, float x, float y, float z, 
                     float timeActivity, String name, int mode, double distance) {
-    Serial.printf("\n📡 POST to API - Device %s:\n", mac);
-    Serial.printf("┌──────────────────────────────────\n");
-    Serial.printf("│ 👤 User: %s\n", userId);
-    Serial.printf("│ 📦 Name: %s\n", name);
-    Serial.printf("│ 📊 RSSI Average: %d\n", media);
-    Serial.printf("│ ⏰ Time: %s\n", tempo);
-    Serial.printf("│ 📱 MAC: %s\n", mac);
-    Serial.printf("│ 🔢 Type: %d\n", deviceType);
-    Serial.printf("│ 🔋 Battery: %d%%\n", batteryLevel);
-    Serial.printf("│ ⏱️ Active Time: %.1f days\n", timeActivity);
-    Serial.printf("│ 📏 Distance: %.2f m\n", distance);
-    Serial.printf("│ 📡 Mode: %d\n", mode);
-    if (deviceType == 4) {
-        Serial.printf("│ 🎯 Accelerometer:\n");
-        Serial.printf("│   ➡️ X: %.2f\n", x);
-        Serial.printf("│   ⬆️ Y: %.2f\n", y);
-        Serial.printf("│   ↗️ Z: %.2f\n", z);
-    }
-    Serial.printf("└──────────────────────────────────\n");
-
     if (connect->validateStatusWIFI()) {
         String json;
         const size_t capacity = JSON_OBJECT_SIZE(25);
@@ -314,31 +266,18 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
         doc["Name"] = name;
  
         serializeJson(doc, json);
-        Serial.printf("\n┌──────────────────────────────────\n");
-        Serial.printf("│ 🌐 URL: %s/PostLocation\n", "http://brd-parque-it.pointservice.com.br/api/v1/IOT");
-        Serial.printf("└──────────────────────────────────\n");
 
         if (http.begin("http://brd-parque-it.pointservice.com.br/api/v1/IOT/PostLocation")) {
             http.addHeader("Content-Type", "application/json");
             http.setTimeout(15000);
 
             int httpCode = http.POST(json);
-            Serial.printf("\n┌──────────────────────────────────\n");
-            Serial.printf("│ 📡 Status: %d %s\n", httpCode, 
-                        httpCode == 200 ? "✅ OK" : 
-                        httpCode >= 500 ? "❌ Server Error" : 
-                        httpCode >= 400 ? "⚠️ Request Error" : 
-                        "⚡ Connection Error");
-            Serial.printf("└──────────────────────────────────\n");
 
             String result = http.getString();
             DynamicJsonDocument payload(4776);
             deserializeJson(payload, result);
-            Serial.println(result);
             _id = payload["_id"].as<String>();
             http.end();
-        } else {
-            Serial.println("Connection Error");
         }
     }
 }
@@ -348,17 +287,9 @@ void Distributor::process()
     if (millis() - inicioMedia > TIME_MEDIA) 
     {
         sending = true;
-        Serial.println("\nStarting sending process");
-
-        Serial.printf("\nallUsers.size: \n %d", users.size());
 
         for (int i = 0; i < users.size(); i++) 
         {
-            Serial.println("\n-----------------------User postIn---------------------------");
-            Serial.printf("\nDevice: %s\n", users[i].getId().c_str());
-            Serial.printf("\nSending...(%d)\n", i+1);
-            Serial.printf("📊 Leituras RSSI acumuladas: %d/3 (mínimo necessário)\n", users[i].getMediasRssi().size());
-
             loggedIn(i);
             if (users[i].isLoggedIn())
             {
@@ -409,7 +340,7 @@ void Distributor::process()
                     if (accuracy > 20.0) accuracy = 20.0;
                     doc["accuracy"] = accuracy;
                     
-                    doc["signalPower"] = mode;
+                    doc["signalPower"] = -mode;  // Sempre negativo!
                     doc["distance"] = distance;
                     
                     // Metadados do ESP32
@@ -420,9 +351,6 @@ void Distributor::process()
                     String jsonData;
                     serializeJson(doc, jsonData);
                     
-                    Serial.println("\n📡 Enviando dados de localização:");
-                    Serial.println(jsonData);
-                    
                     connect->publishTelemetry(jsonData);
                 }
                 else if (connect != nullptr && !ENABLE_GEOLOCATION) {
@@ -431,8 +359,6 @@ void Distributor::process()
                     String macAddress = users[i].getMac().c_str();
                     
                     if (!validateDeviceCodeWithMAC(deviceCode, macAddress)) {
-                        Serial.printf("⚠️ SALTANDO envio - DeviceCode não corresponde ao MAC: %s != %s\n", 
-                                    deviceCode.c_str(), macAddress.c_str());
                         continue;
                     }
                     
@@ -456,17 +382,11 @@ void Distributor::process()
 
         inicioMedia = millis();
         sending = false;
-        Serial.printf("\nFINISH ENDING PROCESS\n");
     }
     else if (millis() - lastScanTime > SCAN_INTERVAL && BLEDevice::getInitialized() == true && !sending) 
     { 
-        Serial.printf("\nTIME to ACTIVE: %d\n", millis() - lastSendTime);
-        Serial.println("\nTESTE 2: START scan + ListDevices (processando dados)");
-        
         if (advertisements != nullptr && BLEDevice::getInitialized() == true) {
-          Serial.println("🔵 Iniciando BLE scan...");
           BLEScanResults* foundDevices = pBLEScan->start(3, false);
-          Serial.printf("🔵 Scan completo! Encontrados: %d dispositivos\n", foundDevices ? foundDevices->getCount() : 0);
           if (foundDevices != nullptr) {
             Serial.println("🟡 Processando dispositivos com ListDevices()...");
             advertisements->ListDevices(*foundDevices);
