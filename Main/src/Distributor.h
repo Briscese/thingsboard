@@ -10,17 +10,33 @@
 class Distributor {
 private:
     std::vector<User>& users;
+    std::vector<String> trackedMacs;
     bool sending;
     unsigned long inicioMedia;
     unsigned long lastScanTime;
     unsigned long lastSendTime;
+    unsigned long lastTrackedRefresh;
+    unsigned long trackedRefreshInterval;
+    unsigned long lastBoardLocationRefresh;
+    unsigned long boardLocationRefreshInterval;
     BLEScan* pBLEScan;
     Advertisements* advertisements;
     HTTPClient http;
     String _id;
     String API_URL;
+    bool hasBoardLocation;
+    bool hasBoardAzimuth;
+    double boardLat;
+    double boardLng;
+    double boardAzimuth;
 
     void loggedIn(int pos);
+    bool refreshTrackedMacs(bool forceRefresh);
+    bool refreshBoardLocation(bool forceRefresh);
+    String buildTrackedObjectsUrl() const;
+    String buildBoardLocationUrl() const;
+    void publishTrackedMacRssiTelemetry(const String& normalizedMac, int rssi);
+    int getTrackedBatteryLevel(const String& normalizedMac) const;
 
 public:
     Distributor(std::vector<User>& users, BLEScan* pBLEScan, String api_url);
@@ -34,6 +50,9 @@ public:
                int deviceType, int batteryLevel, float x, float y, float z, 
                float timeActivity, String name, int mode, double distance);
     void sendDataToThingsBoard(User& user);  // Novo método para MQTT
+    bool isTrackedMac(const String& macAddress) const;
+    bool hasTrackedMacs() const { return !trackedMacs.empty(); }
+    void syncTrackedMacs(bool forceRefresh = false);
     
     // Funções de Geolocalização
     void calculateBeaconLocation(double distance, int rssi, double& latitude, double& longitude);

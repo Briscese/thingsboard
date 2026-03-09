@@ -5,6 +5,8 @@
 #include "config/Config.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <algorithm>
+#include <cctype>
 
 extern Connect* connect;
 
@@ -17,10 +19,423 @@ Distributor::Distributor(std::vector<User>& users, BLEScan* pBLEScan, String api
       inicioMedia(0),
       lastScanTime(0),
       lastSendTime(0),
+      lastTrackedRefresh(0),
+      trackedRefreshInterval(TRACKED_OBJECTS_REFRESH_MS),
+      lastBoardLocationRefresh(0),
+      boardLocationRefreshInterval(TRACKED_OBJECTS_REFRESH_MS),
       pBLEScan(pBLEScan),
       advertisements(new Advertisements()),
-      API_URL(api_url)
+      API_URL(api_url),
+      hasBoardLocation(false),
+      hasBoardAzimuth(false),
+      boardLat(0.0),
+      boardLng(0.0),
+      boardAzimuth(0.0)
 {
+  syncTrackedMacs(true);
+  refreshBoardLocation(true);
+}
+
+static String normalizeMacAddress(const String& macAddress) {
+  String normalized = "";
+  normalized.reserve(12);
+  for (size_t i = 0; i < macAddress.length(); i++) {
+    char c = macAddress[i];
+    if (isxdigit(static_cast<unsigned char>(c))) {
+      normalized += static_cast<char>(toupper(static_cast<unsigned char>(c)));
+    }
+  }
+  return normalized;
+}
+
+static String formatMacAddressForLog(const String& normalizedMac) {
+  if (normalizedMac.length() != 12) {
+    return normalizedMac;
+  }
+
+  String formatted = "";
+  formatted.reserve(17);
+  for (int i = 0; i < 12; i += 2) {
+    if (i > 0) {
+      formatted += ':';
+    }
+    formatted += normalizedMac.substring(i, i + 2);
+  }
+  return formatted;
+}
+
+int Distributor::getTrackedBatteryLevel(const String& normalizedMac) const {
+  for (const User& user : users) {
+    String userMac = normalizeMacAddress(user.getMac());
+    if (userMac == normalizedMac) {
+      return user.getBatteryLevel();
+    }
+  }
+  return -1;
+}
+
+void Distributor::publishTrackedMacRssiTelemetry(const String& normalizedMac, int rssi) {
+  if (connect == nullptr) {
+    return;
+  }
+
+  refreshBoardLocation(false);
+
+  DynamicJsonDocument doc(320);
+  doc["messageType"] = "tracked_rssi";
+  doc["deviceId"] = DEVICE_ID;
+  doc["espDeviceId"] = DEVICE_ID;
+  doc["trackedMac"] = formatMacAddressForLog(normalizedMac);
+  doc["trackedRssi"] = rssi;
+  int batteryLevel = getTrackedBatteryLevel(normalizedMac);
+  if (batteryLevel >= 0) {
+    doc["trackedBatteryLevel"] = batteryLevel;
+  }
+  doc["wifiRssi"] = WiFi.RSSI();
+  doc["uptime"] = millis();
+  doc["status"] = "online";
+  if (hasBoardLocation) {
+    doc["latESP"] = boardLat;
+    doc["lngESP"] = boardLng;
+  }
+  if (hasBoardAzimuth) {
+    doc["azimuthESP"] = boardAzimuth;
+  }
+
+  String jsonData;
+  serializeJson(doc, jsonData);
+  connect->publishTelemetry(jsonData);
+}
+
+String Distributor::buildTrackedObjectsUrl() const {
+  String url = API_URL;
+  String endpoint = TRACKED_OBJECTS_ENDPOINT;
+
+  if (endpoint.length() == 0) {
+    return url;
+  }
+
+  bool urlEndsWithSlash = url.endsWith("/");
+  bool endpointStartsWithSlash = endpoint.startsWith("/");
+
+  if (urlEndsWithSlash && endpointStartsWithSlash) {
+    url.remove(url.length() - 1);
+  } else if (!urlEndsWithSlash && !endpointStartsWithSlash) {
+    url += "/";
+  }
+
+  url += endpoint;
+  return url;
+}
+
+String Distributor::buildBoardLocationUrl() const {
+  String url = API_URL;
+  const String endpointPrefix = "/boards-esp/";
+
+  if (!url.endsWith("/")) {
+    url += "/";
+  }
+
+  if (endpointPrefix.startsWith("/")) {
+    url.remove(url.length() - 1);
+  }
+
+  url += endpointPrefix;
+  url += DEVICE_ID;
+  return url;
+}
+
+bool Distributor::refreshBoardLocation(bool forceRefresh) {
+  if (!forceRefresh && (millis() - lastBoardLocationRefresh) < boardLocationRefreshInterval) {
+    return hasBoardLocation;
+  }
+
+  lastBoardLocationRefresh = millis();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+    return false;
+  }
+
+  String url = buildBoardLocationUrl();
+  WiFiClient httpWifiClient;
+  HTTPClient request;
+  request.setReuse(false);
+  if (!request.begin(httpWifiClient, url)) {
+    Serial.println("Falha ao iniciar requisicao HTTP para localizacao da placa");
+    boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+    return false;
+  }
+
+  request.setTimeout(15000);
+  request.addHeader(API_KEY_HEADER, API_KEY_VALUE);
+  if (strlen(TENANT_VALUE) > 0) {
+    request.addHeader(TENANT_HEADER, TENANT_VALUE);
+  }
+
+  int statusCode = request.GET();
+  if (statusCode != HTTP_CODE_OK) {
+    Serial.print("Falha ao buscar localizacao da placa. HTTP ");
+    Serial.println(statusCode);
+    request.end();
+    boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+    return false;
+  }
+
+  String payload = request.getString();
+  request.end();
+
+  DynamicJsonDocument doc(1024);
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    Serial.print("Erro ao parsear JSON de localizacao da placa: ");
+    Serial.println(error.c_str());
+    boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+    return false;
+  }
+
+  if (!doc["lat"].is<float>() && !doc["lat"].is<double>()) {
+    boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+    return false;
+  }
+  if (!doc["lng"].is<float>() && !doc["lng"].is<double>()) {
+    boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+    return false;
+  }
+
+  boardLat = doc["lat"].as<double>();
+  boardLng = doc["lng"].as<double>();
+  hasBoardLocation = true;
+
+  if (doc["azimuth"].is<float>() || doc["azimuth"].is<double>() || doc["azimuth"].is<int>()) {
+    boardAzimuth = doc["azimuth"].as<double>();
+    hasBoardAzimuth = true;
+  }
+
+  boardLocationRefreshInterval = TRACKED_OBJECTS_REFRESH_MS;
+
+  Serial.print("Localizacao da placa atualizada: latESP=");
+  Serial.print(boardLat, 6);
+  Serial.print(" lngESP=");
+  Serial.print(boardLng, 6);
+  if (hasBoardAzimuth) {
+    Serial.print(" azimuthESP=");
+    Serial.println(boardAzimuth, 2);
+  } else {
+    Serial.println();
+  }
+  return true;
+}
+
+bool Distributor::refreshTrackedMacs(bool forceRefresh) {
+  if (!forceRefresh && (millis() - lastTrackedRefresh) < trackedRefreshInterval) {
+    return true;
+  }
+
+  lastTrackedRefresh = millis();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    trackedRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+    return false;
+  }
+
+  String url = buildTrackedObjectsUrl();
+  Serial.print("Sincronizando MACs em: ");
+  Serial.println(url);
+  Serial.print("WiFi localIP: ");
+  Serial.println(WiFi.localIP());
+  Serial.print("WiFi gateway: ");
+  Serial.println(WiFi.gatewayIP());
+  String apiKeyPreview = String(API_KEY_VALUE);
+  String tenantPreview = String(TENANT_VALUE);
+  Serial.print("Header ");
+  Serial.print(API_KEY_HEADER);
+  Serial.print(" len=");
+  Serial.println(apiKeyPreview.length());
+  if (apiKeyPreview.length() >= 6) {
+    Serial.print("API key preview: ");
+    Serial.print(apiKeyPreview.substring(0, 3));
+    Serial.println("***");
+  }
+  if (tenantPreview.length() > 0) {
+    Serial.print("Tenant enviado: ");
+    Serial.println(tenantPreview);
+  }
+  WiFiClient httpWifiClient;
+  HTTPClient request;
+  request.setReuse(false);
+  if (!request.begin(httpWifiClient, url)) {
+    Serial.println("Falha ao iniciar requisicao HTTP para lista de MACs");
+    trackedRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+    return false;
+  }
+
+  request.setTimeout(15000);
+  request.addHeader(API_KEY_HEADER, API_KEY_VALUE);
+  if (strlen(TENANT_VALUE) > 0) {
+    request.addHeader(TENANT_HEADER, TENANT_VALUE);
+  }
+
+  int statusCode = request.GET();
+  if (statusCode != HTTP_CODE_OK) {
+    Serial.print("Falha ao buscar MACs rastreados. HTTP ");
+    Serial.println(statusCode);
+    if (statusCode < 0) {
+      Serial.print("Detalhe HTTPClient: ");
+      Serial.println(request.errorToString(statusCode).c_str());
+    }
+    String errorBody = request.getString();
+    if (errorBody.length() > 0) {
+      Serial.print("Resposta da API: ");
+      if (errorBody.length() > 180) {
+        Serial.println(errorBody.substring(0, 180));
+      } else {
+        Serial.println(errorBody);
+      }
+    }
+    request.end();
+    trackedRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+    return false;
+  }
+
+  String payload = request.getString();
+  request.end();
+
+  DynamicJsonDocument doc(16384);
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    Serial.print("Erro ao parsear JSON de MACs: ");
+    Serial.println(error.c_str());
+    trackedRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+    return false;
+  }
+
+  std::vector<String> newTrackedMacs;
+  int totalItems = 0;
+  int skippedBoardMismatch = 0;
+  int skippedEmptyMac = 0;
+  int skippedInvalidMac = 0;
+  int skippedDuplicate = 0;
+
+  JsonArray objectsArray;
+  if (doc.is<JsonArray>()) {
+    objectsArray = doc.as<JsonArray>();
+  } else if (doc.is<JsonObject>() && doc["data"].is<JsonArray>()) {
+    objectsArray = doc["data"].as<JsonArray>();
+  }
+
+  if (!objectsArray.isNull()) {
+    for (JsonVariant item : objectsArray) {
+      totalItems++;
+      String mac = "";
+      bool boardMatches = true;
+      String boardEspId = "";
+
+      if (item.is<JsonObject>()) {
+        JsonObject object = item.as<JsonObject>();
+
+        if (object["boardEspId"].is<const char*>()) {
+          boardEspId = object["boardEspId"].as<const char*>();
+          if (boardEspId.length() > 0 && boardEspId != DEVICE_ID) {
+            boardMatches = false;
+          }
+        }
+
+        if (object["id"].is<const char*>()) {
+          mac = object["id"].as<const char*>();
+        } else if (object["mac"].is<const char*>()) {
+          mac = object["mac"].as<const char*>();
+        } else if (object["macAddress"].is<const char*>()) {
+          mac = object["macAddress"].as<const char*>();
+        }
+      } else if (item.is<const char*>()) {
+        mac = item.as<const char*>();
+      }
+
+      if (!boardMatches) {
+        skippedBoardMismatch++;
+        Serial.print("MAC descartado por boardEspId. item.boardEspId=");
+        Serial.print(boardEspId);
+        Serial.print(" deviceIdEsperado=");
+        Serial.println(DEVICE_ID);
+        continue;
+      }
+
+      if (mac.length() == 0) {
+        skippedEmptyMac++;
+        continue;
+      }
+
+      String normalized = normalizeMacAddress(mac);
+      if (normalized.length() != 12) {
+        skippedInvalidMac++;
+        Serial.print("MAC descartado por formato invalido: ");
+        Serial.println(mac);
+        continue;
+      }
+
+      bool alreadyAdded = false;
+      for (const String& tracked : newTrackedMacs) {
+        if (tracked == normalized) {
+          alreadyAdded = true;
+          break;
+        }
+      }
+
+      if (!alreadyAdded) {
+        newTrackedMacs.push_back(normalized);
+      } else {
+        skippedDuplicate++;
+      }
+    }
+  }
+
+  Serial.print("Resumo sync MACs: total=");
+  Serial.print(totalItems);
+  Serial.print(" aceitos=");
+  Serial.print(static_cast<int>(newTrackedMacs.size()));
+  Serial.print(" boardMismatch=");
+  Serial.print(skippedBoardMismatch);
+  Serial.print(" semMac=");
+  Serial.print(skippedEmptyMac);
+  Serial.print(" formatoInvalido=");
+  Serial.print(skippedInvalidMac);
+  Serial.print(" duplicados=");
+  Serial.println(skippedDuplicate);
+
+  if (!newTrackedMacs.empty()) {
+    trackedMacs = newTrackedMacs;
+    trackedRefreshInterval = TRACKED_OBJECTS_REFRESH_MS;
+    Serial.print("MACs rastreados atualizados: ");
+    Serial.println(static_cast<int>(trackedMacs.size()));
+    for (const String& tracked : trackedMacs) {
+      Serial.print(" - MAC permitido: ");
+      Serial.println(tracked);
+    }
+    return true;
+  }
+
+  Serial.println("Lista de MACs rastreados vazia. Mantendo filtro atual.");
+  trackedRefreshInterval = TRACKED_OBJECTS_REFRESH_MS;
+  return false;
+}
+
+void Distributor::syncTrackedMacs(bool forceRefresh) {
+  refreshTrackedMacs(forceRefresh);
+}
+
+bool Distributor::isTrackedMac(const String& macAddress) const {
+  String normalized = normalizeMacAddress(macAddress);
+  if (normalized.length() != 12) {
+    return false;
+  }
+
+  for (const String& tracked : trackedMacs) {
+    if (tracked == normalized) {
+      return true;
+    }
+  }
+  return false;
 }
 
 double CalculateDistance(double signalPower){
@@ -65,21 +480,26 @@ double CalculateDistance(double signalPower){
 }
 
 int CalculateMode(const std::vector<int>& numbers) {
+    if (numbers.empty()) {
+      return 0;
+    }
+
     int mostRepeated = 0;
     int repeat = 0;
     int counter = 0;
 
-    for (int i = 0; i < numbers.size(); i++) {
+    for (size_t i = 0; i < numbers.size(); i++) {
       mostRepeated = numbers[0];
       repeat = 0;
       counter = 0;
-      if(numbers[i] == numbers[i+1]){
+
+      if (i + 1 < numbers.size() && numbers[i] == numbers[i + 1]) {
         repeat++;
-      }else{
+      } else {
         repeat = 1;
       }
 
-      if(repeat > counter){
+      if (repeat > counter) {
         counter = repeat;
         mostRepeated = numbers[i];
       }
@@ -128,6 +548,12 @@ void Distributor::calculateBeaconLocation(double distance, int rssi, double& lat
     
     // Estimar ângulo baseado no RSSI (em graus)
     double angle = estimateAngleFromRSSI(rssi);
+    if (USE_FIXED_AZIMUTH) {
+      angle = fmod(FIXED_AZIMUTH_DEGREES, 360.0);
+      if (angle < 0.0) {
+        angle += 360.0;
+      }
+    }
     
     // Converter ângulo para radianos
     double angleRad = angle * (M_PI / 180.0);
@@ -284,6 +710,8 @@ void Distributor::postIn(String userId, int media, String tempo, String mac,
 
 void Distributor::process() 
 {
+  syncTrackedMacs(false);
+
     if (millis() - inicioMedia > TIME_MEDIA) 
     {
         sending = true;
@@ -294,88 +722,9 @@ void Distributor::process()
             if (users[i].isLoggedIn())
             {
                 int mode = CalculateMode(users[i].getMediasRssi());
-                double distance = CalculateDistance(mode*-1);
                 users[i].clearMediasRssi();
                 users[i].incrementVezes();
-                
-                // Calcular localização do beacon (se habilitado)
-                double beaconLat = 0.0;
-                double beaconLon = 0.0;
-                if (ENABLE_GEOLOCATION) {
-                    calculateBeaconLocation(distance, mode, beaconLat, beaconLon);
-                }
-                
-                // MQTT: Enviar dados simplificados (flat) para ThingsBoard
-                if (connect != nullptr && ENABLE_GEOLOCATION) {
-                    DynamicJsonDocument doc(512);
-                    
-                    // Campos principais
-                    doc["messageType"] = "postin";  // Para filtro do ThingsBoard
-                    doc["type"] = "geoposition";    // Para processar geofences
-                    doc["deviceId"] = DEVICE_ID;
-                    doc["objectId"] = users[i].getMac();
-                    
-                    // Coordenadas
-                    doc["lat"] = beaconLat;
-                    doc["lng"] = beaconLon;
-                    
-                    // Dados do sensor
-                    if (users[i].getBatteryLevel() > 0) {
-                        doc["battery"] = users[i].getBatteryLevel();
-                    }
-                    
-                    float tempX = users[i].getX();
-                    float tempY = users[i].getY();
-                    float tempZ = users[i].getZ();
-                    
-                    if (tempX != 0 || tempY != 0 || tempZ != 0) {
-                        doc["accelerometerX"] = tempX;
-                        doc["accelerometerY"] = tempY;
-                        doc["accelerometerZ"] = tempZ;
-                    }
-                    
-                    // Accuracy estimada
-                    float accuracy = distance * 0.5;
-                    if (accuracy < 2.0) accuracy = 2.0;
-                    if (accuracy > 20.0) accuracy = 20.0;
-                    doc["accuracy"] = accuracy;
-                    
-                    doc["signalPower"] = -mode;  // Sempre negativo!
-                    doc["distance"] = distance;
-                    
-                    // Metadados do ESP32
-                    doc["espFirmwareVersion"] = FIRMWARE_VERSION;
-                    doc["signalStrength"] = WiFi.RSSI();
-                    doc["timestamp"] = connect->getEpochMillis();
-                    
-                    String jsonData;
-                    serializeJson(doc, jsonData);
-                    
-                    connect->publishTelemetry(jsonData);
-                }
-                else if (connect != nullptr && !ENABLE_GEOLOCATION) {
-                    // Formato antigo se geolocalização estiver desabilitada
-                    String deviceCode = "Card_" + users[i].getId();
-                    String macAddress = users[i].getMac().c_str();
-                    
-                    if (!validateDeviceCodeWithMAC(deviceCode, macAddress)) {
-                        continue;
-                    }
-                    
-                    DynamicJsonDocument doc(512);
-                    doc["messageType"] = "postin";
-                    doc["gatewayId"] = DEVICE_ID;
-                    doc["deviceId"] = users[i].getId();
-                    doc["mac"] = users[i].getMac();
-                    doc["sinalPower"] = mode;
-                    doc["batteryLevel"] = users[i].getBatteryLevel();
-                    doc["distance"] = distance;
-                    doc["ts"] = connect->getEpochMillis();
-
-                    String jsonData;
-                    serializeJson(doc, jsonData);
-                    connect->publishTelemetry(jsonData);
-                }
+            publishTrackedMacRssiTelemetry(normalizeMacAddress(users[i].getMac()), -mode);
                 delay(100);
             }
         }
@@ -388,6 +737,41 @@ void Distributor::process()
         if (advertisements != nullptr && BLEDevice::getInitialized() == true) {
           BLEScanResults* foundDevices = pBLEScan->start(3, false);
           if (foundDevices != nullptr) {
+            if (!trackedMacs.empty()) {
+              const int rssiNotFound = 127;
+              std::vector<int> trackedRssi(trackedMacs.size(), rssiNotFound);
+              int totalFound = foundDevices->getCount();
+
+              for (int i = 0; i < totalFound; i++) {
+                BLEAdvertisedDevice device = foundDevices->getDevice(i);
+                String scannedMac = String(device.getAddress().toString().c_str());
+                String normalizedScannedMac = normalizeMacAddress(scannedMac);
+                int scannedRssi = device.getRSSI();
+
+                for (size_t trackedIndex = 0; trackedIndex < trackedMacs.size(); trackedIndex++) {
+                  if (trackedMacs[trackedIndex] == normalizedScannedMac) {
+                    trackedRssi[trackedIndex] = scannedRssi;
+                  }
+                }
+              }
+
+              Serial.println("RSSI dos MACs rastreados:");
+              for (size_t trackedIndex = 0; trackedIndex < trackedMacs.size(); trackedIndex++) {
+                Serial.print(" - ");
+                Serial.print(formatMacAddressForLog(trackedMacs[trackedIndex]));
+                Serial.print(": ");
+
+                if (trackedRssi[trackedIndex] == rssiNotFound) {
+                  Serial.println("nao encontrado neste scan");
+                  publishTrackedMacRssiTelemetry(trackedMacs[trackedIndex], -127);
+                } else {
+                  Serial.print(trackedRssi[trackedIndex]);
+                  Serial.println(" dBm");
+                  publishTrackedMacRssiTelemetry(trackedMacs[trackedIndex], trackedRssi[trackedIndex]);
+                }
+              }
+            }
+
             Serial.println("🟡 Processando dispositivos com ListDevices()...");
             advertisements->ListDevices(*foundDevices);
             Serial.println("✅ ListDevices() completou com sucesso!");

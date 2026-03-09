@@ -85,7 +85,7 @@ public:
     void processIBeacon();
     void processTelemetry(uint8_t *data, size_t len);
     void processAccelerometer(uint8_t *data, size_t len, const std::vector<int>& offset);
-    void ListDevices(BLEScanResults foundDevices);
+    void ListDevices(BLEScanResults& foundDevices);
 };
 
 #endif // ADVERTISEMENTS_H 

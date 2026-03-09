@@ -10,7 +10,7 @@
 ## 📋 Verificar Configurações
 
 ### Config.h
-- [ ] `MQTT_SERVER` = "52.247.226.162" ✓
+- [ ] `MQTT_SERVER` = "52.247.226.162" 
 - [ ] `MQTT_PORT` = 1883 ✓
 - [ ] `MQTT_TOKEN` = "pAGDT3S1SFG8i4TytyNu" ✓
 - [ ] `MQTT_TOPIC` = "v1/devices/me/telemetry" ✓

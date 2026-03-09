@@ -74,6 +74,8 @@ void Connect::updatePreferences() {
 }
 
 bool Connect::validateStatusWIFI() {
+    const unsigned long WIFI_CONNECT_TIMEOUT_MS = 30000;
+
     if (WiFi.RSSI() < WIFI_LIMIT) {
         Serial.println("WiFi Status: Disconnected (Low Power)");
         Serial.print("RSSI: ");
@@ -122,7 +124,13 @@ bool Connect::validateStatusWIFI() {
             Serial.println("WiFi Status: Connecting");
         }
 
+        unsigned long connectStart = millis();
         while (WiFi.status() != WL_CONNECTED) {
+            if (millis() - connectStart > WIFI_CONNECT_TIMEOUT_MS) {
+                Serial.println("WiFi Status: Connection timeout");
+                break;
+            }
+
             Serial.print("Network: ");
             Serial.println(NAME);
 
@@ -221,7 +229,7 @@ bool Connect::validateStatusWIFI() {
         syncTime();
     }
 
-    return attempts == 0;
+    return WiFi.status() == WL_CONNECTED;
 }
 
 void Connect::loadErrorMode() {

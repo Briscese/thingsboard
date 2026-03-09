@@ -119,6 +119,37 @@ static std::string GetMacLast4(const std::string& mac) {
     return last4;
 }
 
+static std::string NormalizeMac(const std::string& mac) {
+    std::string normalized;
+    normalized.reserve(12);
+    for (char c : mac) {
+        if (std::isxdigit(static_cast<unsigned char>(c))) {
+            normalized.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        }
+    }
+    return normalized;
+}
+
+static String NormalizeMacString(const String& mac) {
+    String normalized = "";
+    normalized.reserve(12);
+    for (size_t i = 0; i < mac.length(); i++) {
+        char c = mac[i];
+        if (isxdigit(static_cast<unsigned char>(c))) {
+            normalized += static_cast<char>(toupper(static_cast<unsigned char>(c)));
+        }
+    }
+    return normalized;
+}
+
+static double NormalizeAzimuth(double azimuth) {
+    double normalized = fmod(azimuth, 360.0);
+    if (normalized < 0.0) {
+        normalized += 360.0;
+    }
+    return normalized;
+}
+
 String Advertisements::getMacAddress()
 {
     String deviceStr = device.toString();
@@ -188,27 +219,8 @@ void Advertisements::processTelemetry(uint8_t *data, size_t len)
     batteryLevel = batteryPercent;
     timeActivity = (uptime / 10.0) / 86400;
     
-    // 📡 Enviar dados de telemetria para ThingsBoard (buffer estático para evitar alocações)
-    if (connect != nullptr && connect->isMQTTConnected()) {
-        static DynamicJsonDocument doc(512);
-        static char jsonBuf[512];
-        doc.clear();
-
-        // Campos necessários para a rule chain processar corretamente
-        doc["messageType"] = "telemetry_tlm";
-        doc["deviceId"] = macAddress.c_str();
-        doc["mac"] = macAddress.c_str();
-        doc["battery"] = batteryPercent;
-        doc["temperatureC"] = temperatureC;
-        doc["rssi"] = rssi;
-        doc["ts"] = connect->getEpochMillis();
-
-        size_t written = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
-        if (written > 0 && written < sizeof(jsonBuf)) {
-            connect->loopMQTT();
-            connect->publishTelemetryRaw(jsonBuf, written);
-        }
-    }
+    // Telemetria MQTT secundaria desabilitada.
+    // O envio MQTT foi centralizado em Distributor::publishTrackedMacRssiTelemetry.
 }
 
 void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::vector<int> &offset)
@@ -266,195 +278,100 @@ void Advertisements::processAccelerometer(uint8_t *data, size_t len, const std::
     if (distributor != nullptr) {
         distributor->UserRegisterData(macAddress.c_str(), deviceCode.c_str(), rssi, deviceType, batteryLevel, x, y, z, timeActivity, name);
         
-        // 📡 Enviar dados de acelerômetro para ThingsBoard no NOVO FORMATO
-        if (connect != nullptr && connect->isMQTTConnected() && ENABLE_GEOLOCATION) {
-            // Calcular distância baseada no RSSI (calibrado para Beacon M2)
-            double distance = 0.0;
-            const double n = 2.0;   // Refinado com dados até 10m
-            const double A = -60;   // Refinado
-            double B = 0.0;
-            
-            int signalPower=rssi;
-            switch(signalPower){
-                case -90 ... -88:B=2.5;break;case -87 ... -85:B=2.1;break;case -84 ... -82:B=1.6;break;
-                case -81 ... -79:B=1.1;break;case -78 ... -76:B=0.7;break;case -75 ... -73:B=0.5;break;
-                case -72 ... -70:B=0.2;break;case -69 ... -67:B=0.0;break;case -66 ... -64:B=0.0;break;
-                default:B=0.0;
-            }
-            distance = pow(10, (A - signalPower) / (10 * n)) + B;
-            
-            // Calcular ângulo e posição do beacon
-            double normalized = ((rssi + 90.0) / 50.0) * 360.0;
-            if (normalized < 0) normalized = 0;
-            if (normalized > 360) normalized = 360;
-            double angleRad = normalized * (M_PI / 180.0);
-            
-            const double EARTH_RADIUS = 6371000.0;
-            double deltaLat = (distance * cos(angleRad)) / EARTH_RADIUS * (180.0 / M_PI);
-            double deltaLon = (distance * sin(angleRad)) / (EARTH_RADIUS * cos(GATEWAY_LATITUDE * M_PI / 180.0)) * (180.0 / M_PI);
-            
-            double beaconLat = GATEWAY_LATITUDE + deltaLat;
-            double beaconLon = GATEWAY_LONGITUDE + deltaLon;
-            
-            // Calcular accuracy
-            float accuracy = distance * 0.5;
-            if (accuracy < 2.0) accuracy = 2.0;
-            if (accuracy > 20.0) accuracy = 20.0;
-            
-            // Criar JSON simplificado (flat) para ThingsBoard processar
-            DynamicJsonDocument doc(512);
-            
-            // Campos principais
-            doc["messageType"] = "postin";  // Para filtro do ThingsBoard
-            doc["type"] = "geoposition";      // Para processar geofences
-            doc["deviceId"] = DEVICE_ID;
-            doc["objectId"] = macAddress.c_str();
-            
-            // Coordenadas
-            doc["lat"] = beaconLat;
-            doc["lng"] = beaconLon;
-            
-            // Dados do sensor
-            if (batteryLevel > 0) {
-                doc["battery"] = batteryLevel;
-            }
-            doc["accelerometerX"] = roundf(x * 1000) / 1000;
-            doc["accelerometerY"] = roundf(y * 1000) / 1000;
-            doc["accelerometerZ"] = roundf(z * 1000) / 1000;
-            doc["accuracy"] = accuracy;
-            doc["signalPower"] = rssi;
-            doc["distance"] = distance;
-            
-            // Metadados do ESP32
-            doc["espFirmwareVersion"] = FIRMWARE_VERSION;
-            doc["signalStrength"] = WiFi.RSSI();
-            doc["timestamp"] = connect->getEpochMillis();
-            
-            String jsonData;
-            serializeJson(doc, jsonData);
-            
-            if (connect->publishTelemetry(jsonData)) {
-            }
-        }
+        // Geolocalizacao MQTT desabilitada: envio centralizado em Distributor::publishTrackedMacRssiTelemetry.
     }
 }
 
-void Advertisements::ListDevices(BLEScanResults foundDevices)
+void Advertisements::ListDevices(BLEScanResults& foundDevices)
 {
     int maxDevices = foundDevices.getCount();
     if (maxDevices <= 0)
         return;
-    
-    // 🔍 PROCURAR O DISPOSITIVO ALVO PRIMEIRO (com proteção)
-    const String TARGET_MAC = "E4:1E:F1:8C:59:5C";
-    bool targetFound = false;
-    int targetIndex = -1;
-    
+
     // Limitar busca para evitar crashes
     int searchLimit = min(maxDevices, 100);
-    
-    // Buscar o dispositivo alvo na lista
-    for (int i = 0; i < searchLimit; i++) {
-        try {
-            BLEAdvertisedDevice dev = foundDevices.getDevice(i);
-            String mac = dev.getAddress().toString();
-            mac.toUpperCase();
-            if (mac == TARGET_MAC) {
-                targetFound = true;
-                targetIndex = i;
-                break;
-            }
-        } catch (...) {
-            continue;  // Ignora dispositivos problemáticos
-        }
-    }
-    
-    if (!targetFound) {
-        return;  // Sair se não encontrou o dispositivo alvo
-    }
-
-    // Processar APENAS o dispositivo alvo
     const int accelLimit = 30;
     int accelProcessed = 0;
+    bool processedTrackedDevice = false;
+    const String targetMacNormalized = NormalizeMacString(String(TARGET_BEACON_MAC));
 
-    try
-    {
-        BLEAdvertisedDevice advertisedDevice = foundDevices.getDevice(targetIndex);
+    for (int i = 0; i < searchLimit; i++) {
+            BLEAdvertisedDevice advertisedDevice = foundDevices.getDevice(i);
 
-        // ✅ MAC: Use API directly - returns String (Arduino)
-        String macStr = advertisedDevice.getAddress().toString();
-        macStr.toUpperCase();
-        
-        setMacAddress(macStr.c_str());
-        setRssi(advertisedDevice.getRSSI());
+            // ✅ MAC: Use API directly - returns String (Arduino)
+            String macStr = advertisedDevice.getAddress().toString();
+            macStr.toUpperCase();
 
-        // ✅ Only process if has Service Data
-        if (!advertisedDevice.haveServiceData())
-        {
-            return;
-        }
+            bool shouldProcess = false;
+            if (distributor != nullptr && distributor->hasTrackedMacs()) {
+                shouldProcess = distributor->isTrackedMac(macStr);
+            } else {
+                shouldProcess = (NormalizeMacString(macStr) == targetMacNormalized);
+            }
 
-        BLEUUID serviceUUID = advertisedDevice.getServiceDataUUID();
-
-        // ✅ Service Data BINARY (correct way - String from Arduino lib)
-        String sd = advertisedDevice.getServiceData();
-        size_t len = sd.length();
-        
-        if (!len || len > 64)
-        {
-            return;
-        }
-        
-        // 🔧 CRITICAL: Copy binary data to local buffer IMMEDIATELY
-        uint8_t data[64];
-        memcpy(data, sd.c_str(), len);
-
-        // ✅ Match against table
-        for (const mapData &item : list)
-        {
-            if (!serviceUUID.equals(BLEUUID((uint16_t)item.uuid)))
-            {
+            if (!shouldProcess) {
                 continue;
             }
-            
-            // Processando UUID válido
 
-            // If accelerometer (Minew/Moko): validate type and minimum size by offsets
-            if (!item.offset.empty())
-            {
-                if (accelProcessed >= accelLimit)
-                {
-                    continue;
-                }
+            processedTrackedDevice = true;
+            setMacAddress(macStr.c_str());
+            setRssi(advertisedDevice.getRSSI());
 
-                if (len < 1)
-                    continue;
-
-                if (data[0] != item.type)
-                {
-                    continue;
-                }
-
-                size_t minRequired = (size_t)(*std::max_element(item.offset.begin(), item.offset.end()) + 1);
-                if (len < minRequired)
-                {
-                    continue;
-                }
-
-                processAccelerometer((uint8_t *)data, len, item.offset);
-                accelProcessed++;
+            // ✅ Only process if has Service Data
+            if (!advertisedDevice.haveServiceData()) {
+                continue;
             }
-            else
-            {
-                // Telemetry (Eddystone TLM normally 0x20, with 14 bytes)
-                if (len >= 14)
-                {
-                    processTelemetry((uint8_t *)data, len);
+
+            BLEUUID serviceUUID = advertisedDevice.getServiceDataUUID();
+
+            // ✅ Service Data BINARY (correct way - String from Arduino lib)
+            String sd = advertisedDevice.getServiceData();
+            size_t len = sd.length();
+
+            if (!len || len > 64) {
+                continue;
+            }
+
+            // 🔧 CRITICAL: Copy binary data to local buffer IMMEDIATELY
+            uint8_t data[64];
+            memcpy(data, sd.c_str(), len);
+
+            // ✅ Match against table
+            for (const mapData &item : list) {
+                if (!serviceUUID.equals(BLEUUID((uint16_t)item.uuid))) {
+                    continue;
+                }
+
+                // If accelerometer (Minew/Moko): validate type and minimum size by offsets
+                if (!item.offset.empty()) {
+                    if (accelProcessed >= accelLimit) {
+                        continue;
+                    }
+
+                    if (len < 1)
+                        continue;
+
+                    if (data[0] != item.type) {
+                        continue;
+                    }
+
+                    size_t minRequired = (size_t)(*std::max_element(item.offset.begin(), item.offset.end()) + 1);
+                    if (len < minRequired) {
+                        continue;
+                    }
+
+                    processAccelerometer((uint8_t *)data, len, item.offset);
+                    accelProcessed++;
+                } else {
+                    // Telemetry (Eddystone TLM normally 0x20, with 14 bytes)
+                    if (len >= 14) {
+                        processTelemetry((uint8_t *)data, len);
+                    }
                 }
             }
-        }
     }
-    catch (...)
-    {
+
+    if (!processedTrackedDevice) {
+        return;
     }
 }
