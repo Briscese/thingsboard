@@ -5,6 +5,7 @@
 #include "config/Config.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <algorithm>
 #include <cctype>
 
@@ -12,6 +13,13 @@ extern Connect* connect;
 
 const int SCAN_INTERVAL = 3000;
 const int TIME_MEDIA = 30000;  // 30 segundos - garante tempo para acumular 3+ leituras (scans a cada 3s)
+
+static String buildHttpFallbackUrl(const String& url);
+
+static void configureSecureClient(WiFiClientSecure& client) {
+  client.setInsecure();
+  client.setTimeout(15000);
+}
 
 Distributor::Distributor(std::vector<User>& users, BLEScan* pBLEScan, String api_url) 
     : users(users),
@@ -30,10 +38,237 @@ Distributor::Distributor(std::vector<User>& users, BLEScan* pBLEScan, String api
       hasBoardAzimuth(false),
       boardLat(0.0),
       boardLng(0.0),
-      boardAzimuth(0.0)
+      boardAzimuth(0.0),
+      connectivityDiagnosticsDone(false)
 {
+  if (strlen(AUTH_BEARER_TOKEN) == 0) {
+    refreshBearerTokenFromMiddleware();
+  }
   syncTrackedMacs(true);
   refreshBoardLocation(true);
+}
+
+void Distributor::runConnectivityDiagnostics() {
+  if (connectivityDiagnosticsDone) {
+    return;
+  }
+  connectivityDiagnosticsDone = true;
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Diag conexao: WiFi nao conectado, pulando testes HTTPS");
+    return;
+  }
+
+  Serial.println("=== Diag conexao HTTPS iniciado ===");
+
+  {
+    String healthUrl = API_URL;
+    if (!healthUrl.endsWith("/")) {
+      healthUrl += "/";
+    }
+    healthUrl += "health";
+
+    HTTPClient request;
+    request.setReuse(false);
+    WiFiClientSecure secureClient;
+    configureSecureClient(secureClient);
+
+    if (request.begin(secureClient, healthUrl)) {
+      request.setTimeout(15000);
+      int statusCode = request.GET();
+      Serial.print("Diag GET /health HTTP ");
+      Serial.println(statusCode);
+      if (statusCode < 0) {
+        Serial.print("Diag GET /health erro: ");
+        Serial.println(request.errorToString(statusCode).c_str());
+      } else {
+        String body = request.getString();
+        Serial.print("Diag GET /health body: ");
+        if (body.length() > 120) {
+          Serial.println(body.substring(0, 120));
+        } else {
+          Serial.println(body);
+        }
+      }
+      request.end();
+    } else {
+      Serial.println("Diag GET /health: falha no begin HTTPS");
+    }
+  }
+
+  {
+    String loginUrl = String(MIDDLEWARE_LOGIN_URL);
+    HTTPClient request;
+    request.setReuse(false);
+    WiFiClientSecure secureClient;
+    configureSecureClient(secureClient);
+
+    if (request.begin(secureClient, loginUrl)) {
+      request.setTimeout(15000);
+      request.addHeader("Content-Type", "application/json");
+      request.addHeader("accept", "text/plain");
+
+      StaticJsonDocument<256> body;
+      body["username"] = MIDDLEWARE_USERNAME;
+      body["password"] = MIDDLEWARE_PASSWORD;
+      String loginPayload;
+      serializeJson(body, loginPayload);
+
+      int statusCode = request.POST(loginPayload);
+      Serial.print("Diag POST /user/login HTTP ");
+      Serial.println(statusCode);
+      if (statusCode < 0) {
+        Serial.print("Diag POST /user/login erro: ");
+        Serial.println(request.errorToString(statusCode).c_str());
+      } else {
+        String response = request.getString();
+        Serial.print("Diag POST /user/login body: ");
+        if (response.length() > 220) {
+          Serial.println(response.substring(0, 220));
+        } else {
+          Serial.println(response);
+        }
+      }
+      request.end();
+    } else {
+      Serial.println("Diag POST /user/login: falha no begin HTTPS");
+    }
+  }
+
+  Serial.println("=== Diag conexao HTTPS fim ===");
+}
+
+bool Distributor::refreshBearerTokenFromMiddleware() {
+  if (strlen(MIDDLEWARE_LOGIN_URL) == 0 || strlen(MIDDLEWARE_USERNAME) == 0 || strlen(MIDDLEWARE_PASSWORD) == 0) {
+    return false;
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+
+  HTTPClient request;
+  request.setReuse(false);
+  String loginUrl = String(MIDDLEWARE_LOGIN_URL);
+  WiFiClientSecure secureClient;
+  if (loginUrl.startsWith("https://")) {
+    configureSecureClient(secureClient);
+    if (!request.begin(secureClient, loginUrl)) {
+      Serial.println("Falha ao iniciar login HTTPS no middleware");
+      return false;
+    }
+  } else if (!request.begin(loginUrl)) {
+    Serial.println("Falha ao iniciar login no middleware");
+    return false;
+  }
+
+  request.setTimeout(15000);
+  request.addHeader("Content-Type", "application/json");
+  request.addHeader("accept", "text/plain");
+
+  StaticJsonDocument<256> body;
+  body["username"] = MIDDLEWARE_USERNAME;
+  body["password"] = MIDDLEWARE_PASSWORD;
+  String loginPayload;
+  serializeJson(body, loginPayload);
+
+  int statusCode = request.POST(loginPayload);
+  if (statusCode < 0 && loginUrl.startsWith("https://")) {
+    request.end();
+    String fallbackUrl = buildHttpFallbackUrl(loginUrl);
+    HTTPClient fallbackRequest;
+    fallbackRequest.setReuse(false);
+    if (fallbackRequest.begin(fallbackUrl)) {
+      fallbackRequest.setTimeout(15000);
+      fallbackRequest.addHeader("Content-Type", "application/json");
+      fallbackRequest.addHeader("accept", "text/plain");
+      statusCode = fallbackRequest.POST(loginPayload);
+      Serial.print("Fallback login URL: ");
+      Serial.println(fallbackUrl);
+      if (statusCode == HTTP_CODE_OK) {
+        String responseBody = fallbackRequest.getString();
+        fallbackRequest.end();
+
+        DynamicJsonDocument response(4096);
+        DeserializationError error = deserializeJson(response, responseBody);
+        if (error) {
+          Serial.print("Erro parse login middleware (fallback): ");
+          Serial.println(error.c_str());
+          return false;
+        }
+
+        if (!response["content"]["data"]["token"].is<const char*>()) {
+          Serial.println("Login middleware fallback sem token");
+          return false;
+        }
+
+        runtimeBearerToken = response["content"]["data"]["token"].as<const char*>();
+        if (runtimeBearerToken.length() == 0) {
+          return false;
+        }
+
+        Serial.println("Token middleware atualizado na placa (fallback HTTP)");
+        return true;
+      }
+      fallbackRequest.end();
+    }
+  }
+
+  if (statusCode != HTTP_CODE_OK) {
+    Serial.print("Falha no login middleware. HTTP ");
+    Serial.println(statusCode);
+    if (statusCode < 0) {
+      Serial.print("Detalhe login middleware: ");
+      Serial.println(request.errorToString(statusCode).c_str());
+    }
+    request.end();
+    return false;
+  }
+
+  String responseBody = request.getString();
+  request.end();
+
+  DynamicJsonDocument response(4096);
+  DeserializationError error = deserializeJson(response, responseBody);
+  if (error) {
+    Serial.print("Erro parse login middleware: ");
+    Serial.println(error.c_str());
+    return false;
+  }
+
+  if (!response["content"]["data"]["token"].is<const char*>()) {
+    Serial.println("Login middleware sem token");
+    return false;
+  }
+
+  runtimeBearerToken = response["content"]["data"]["token"].as<const char*>();
+  if (runtimeBearerToken.length() == 0) {
+    return false;
+  }
+
+  Serial.println("Token middleware atualizado na placa");
+  return true;
+}
+
+void Distributor::addBackendAuthHeaders(HTTPClient& request) {
+  if (strlen(API_KEY_VALUE) > 0) {
+    request.addHeader(API_KEY_HEADER, API_KEY_VALUE);
+  }
+
+  String bearer = "";
+  if (strlen(AUTH_BEARER_TOKEN) > 0) {
+    bearer = String(AUTH_BEARER_TOKEN);
+  } else if (runtimeBearerToken.length() > 0) {
+    bearer = runtimeBearerToken;
+  }
+
+  if (bearer.length() > 0) {
+    request.addHeader(AUTH_HEADER, String("Bearer ") + bearer);
+  }
+
+  if (strlen(TENANT_VALUE) > 0) {
+    request.addHeader(TENANT_HEADER, TENANT_VALUE);
+  }
 }
 
 static String normalizeMacAddress(const String& macAddress) {
@@ -64,14 +299,78 @@ static String formatMacAddressForLog(const String& normalizedMac) {
   return formatted;
 }
 
-int Distributor::getTrackedBatteryLevel(const String& normalizedMac) const {
+static String buildHttpFallbackUrl(const String& url) {
+  if (url.startsWith("https://")) {
+    return String("http://") + url.substring(8);
+  }
+  return String("");
+}
+
+int Distributor::getTrackedBatteryLevel(const String& normalizedMac) {
   for (const User& user : users) {
     String userMac = normalizeMacAddress(user.getMac());
     if (userMac == normalizedMac) {
-      return user.getBatteryLevel();
+      int batteryLevel = user.getBatteryLevel();
+      if (batteryLevel > 0) {
+        for (size_t i = 0; i < trackedBatteryMacs.size(); i++) {
+          if (trackedBatteryMacs[i] == normalizedMac) {
+            trackedBatteryValues[i] = batteryLevel;
+            return batteryLevel;
+          }
+        }
+        trackedBatteryMacs.push_back(normalizedMac);
+        trackedBatteryValues.push_back(batteryLevel);
+        return batteryLevel;
+      }
+      break;
     }
   }
+
+  for (size_t i = 0; i < trackedBatteryMacs.size(); i++) {
+    if (trackedBatteryMacs[i] == normalizedMac) {
+      return trackedBatteryValues[i];
+    }
+  }
+
   return -1;
+}
+
+void Distributor::updateTrackedBatteryLevel(const String& macAddress, int batteryLevel) {
+  if (batteryLevel <= 0) {
+    return;
+  }
+
+  String normalizedMac = normalizeMacAddress(macAddress);
+  if (normalizedMac.length() != 12) {
+    return;
+  }
+
+  for (size_t i = 0; i < trackedBatteryMacs.size(); i++) {
+    if (trackedBatteryMacs[i] == normalizedMac) {
+      trackedBatteryValues[i] = batteryLevel;
+      return;
+    }
+  }
+
+  trackedBatteryMacs.push_back(normalizedMac);
+  trackedBatteryValues.push_back(batteryLevel);
+}
+
+int Distributor::applyTrackedRssiSmoothing(const String& normalizedMac, int rawRssi) {
+  const float alpha = 0.35f;
+
+  for (size_t i = 0; i < smoothedRssiMacs.size(); i++) {
+    if (smoothedRssiMacs[i] == normalizedMac) {
+      float smoothed = (alpha * static_cast<float>(rawRssi)) +
+                       ((1.0f - alpha) * smoothedRssiValues[i]);
+      smoothedRssiValues[i] = smoothed;
+      return static_cast<int>(roundf(smoothed));
+    }
+  }
+
+  smoothedRssiMacs.push_back(normalizedMac);
+  smoothedRssiValues.push_back(static_cast<float>(rawRssi));
+  return rawRssi;
 }
 
 void Distributor::publishTrackedMacRssiTelemetry(const String& normalizedMac, int rssi) {
@@ -81,12 +380,17 @@ void Distributor::publishTrackedMacRssiTelemetry(const String& normalizedMac, in
 
   refreshBoardLocation(false);
 
+  int trackedRssiToSend = rssi;
+  if (rssi != -127) {
+    trackedRssiToSend = applyTrackedRssiSmoothing(normalizedMac, rssi);
+  }
+
   DynamicJsonDocument doc(320);
   doc["messageType"] = "tracked_rssi";
   doc["deviceId"] = DEVICE_ID;
   doc["espDeviceId"] = DEVICE_ID;
   doc["trackedMac"] = formatMacAddressForLog(normalizedMac);
-  doc["trackedRssi"] = rssi;
+  doc["trackedRssi"] = trackedRssiToSend;
   int batteryLevel = getTrackedBatteryLevel(normalizedMac);
   if (batteryLevel >= 0) {
     doc["trackedBatteryLevel"] = batteryLevel;
@@ -158,31 +462,128 @@ bool Distributor::refreshBoardLocation(bool forceRefresh) {
   }
 
   String url = buildBoardLocationUrl();
-  WiFiClient httpWifiClient;
   HTTPClient request;
   request.setReuse(false);
-  if (!request.begin(httpWifiClient, url)) {
+  WiFiClientSecure secureClient;
+  if (url.startsWith("https://")) {
+    configureSecureClient(secureClient);
+    if (!request.begin(secureClient, url)) {
+      Serial.println("Falha ao iniciar requisicao HTTPS para localizacao da placa");
+      boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+      return false;
+    }
+  } else if (!request.begin(url)) {
     Serial.println("Falha ao iniciar requisicao HTTP para localizacao da placa");
     boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
     return false;
   }
 
   request.setTimeout(15000);
-  request.addHeader(API_KEY_HEADER, API_KEY_VALUE);
-  if (strlen(TENANT_VALUE) > 0) {
-    request.addHeader(TENANT_HEADER, TENANT_VALUE);
-  }
+  addBackendAuthHeaders(request);
 
   int statusCode = request.GET();
+  if (statusCode == HTTP_CODE_UNAUTHORIZED && strlen(AUTH_BEARER_TOKEN) == 0) {
+    request.end();
+    runtimeBearerToken = "";
+    if (refreshBearerTokenFromMiddleware()) {
+      HTTPClient retryRequest;
+      retryRequest.setReuse(false);
+      bool retryBeginOk = false;
+      WiFiClientSecure retrySecureClient;
+      if (url.startsWith("https://")) {
+        configureSecureClient(retrySecureClient);
+        retryBeginOk = retryRequest.begin(retrySecureClient, url);
+      } else {
+        retryBeginOk = retryRequest.begin(url);
+      }
+      if (retryBeginOk) {
+        retryRequest.setTimeout(15000);
+        addBackendAuthHeaders(retryRequest);
+        statusCode = retryRequest.GET();
+        if (statusCode == HTTP_CODE_OK) {
+          String payload = retryRequest.getString();
+          retryRequest.end();
+
+          DynamicJsonDocument doc(1024);
+          DeserializationError error = deserializeJson(doc, payload);
+          if (error) {
+            Serial.print("Erro ao parsear JSON de localizacao da placa: ");
+            Serial.println(error.c_str());
+            boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+            return false;
+          }
+
+          if (!doc["lat"].is<float>() && !doc["lat"].is<double>()) {
+            boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+            return false;
+          }
+          if (!doc["lng"].is<float>() && !doc["lng"].is<double>()) {
+            boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+            return false;
+          }
+
+          boardLat = doc["lat"].as<double>();
+          boardLng = doc["lng"].as<double>();
+          hasBoardLocation = true;
+
+          if (doc["azimuth"].is<float>() || doc["azimuth"].is<double>() || doc["azimuth"].is<int>()) {
+            boardAzimuth = doc["azimuth"].as<double>();
+            hasBoardAzimuth = true;
+          }
+
+          boardLocationRefreshInterval = TRACKED_OBJECTS_REFRESH_MS;
+
+          Serial.print("Localizacao da placa atualizada: latESP=");
+          Serial.print(boardLat, 6);
+          Serial.print(" lngESP=");
+          Serial.print(boardLng, 6);
+          if (hasBoardAzimuth) {
+            Serial.print(" azimuthESP=");
+            Serial.println(boardAzimuth, 2);
+          } else {
+            Serial.println();
+          }
+          return true;
+        }
+        retryRequest.end();
+      }
+    }
+  }
+
+  String payload = "";
+  if (statusCode < 0 && url.startsWith("https://")) {
+    request.end();
+    String fallbackUrl = buildHttpFallbackUrl(url);
+    HTTPClient fallbackRequest;
+    fallbackRequest.setReuse(false);
+    if (fallbackUrl.length() > 0 && fallbackRequest.begin(fallbackUrl)) {
+      fallbackRequest.setTimeout(15000);
+      addBackendAuthHeaders(fallbackRequest);
+      statusCode = fallbackRequest.GET();
+      Serial.print("Fallback localizacao URL: ");
+      Serial.println(fallbackUrl);
+      if (statusCode == HTTP_CODE_OK) {
+        payload = fallbackRequest.getString();
+      }
+      fallbackRequest.end();
+    }
+  }
+
   if (statusCode != HTTP_CODE_OK) {
     Serial.print("Falha ao buscar localizacao da placa. HTTP ");
     Serial.println(statusCode);
+    if (statusCode < 0) {
+      Serial.print("Detalhe localizacao placa: ");
+      Serial.println(request.errorToString(statusCode).c_str());
+    }
     request.end();
     boardLocationRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
     return false;
   }
 
-  String payload = request.getString();
+  if (payload.length() == 0) {
+    payload = request.getString();
+  }
   request.end();
 
   DynamicJsonDocument doc(1024);
@@ -228,6 +629,8 @@ bool Distributor::refreshBoardLocation(bool forceRefresh) {
 }
 
 bool Distributor::refreshTrackedMacs(bool forceRefresh) {
+  runConnectivityDiagnostics();
+
   if (!forceRefresh && (millis() - lastTrackedRefresh) < trackedRefreshInterval) {
     return true;
   }
@@ -261,22 +664,184 @@ bool Distributor::refreshTrackedMacs(bool forceRefresh) {
     Serial.print("Tenant enviado: ");
     Serial.println(tenantPreview);
   }
-  WiFiClient httpWifiClient;
   HTTPClient request;
   request.setReuse(false);
-  if (!request.begin(httpWifiClient, url)) {
+  WiFiClientSecure secureClient;
+  if (url.startsWith("https://")) {
+    configureSecureClient(secureClient);
+    if (!request.begin(secureClient, url)) {
+      Serial.println("Falha ao iniciar requisicao HTTPS para lista de MACs");
+      trackedRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+      return false;
+    }
+  } else if (!request.begin(url)) {
     Serial.println("Falha ao iniciar requisicao HTTP para lista de MACs");
     trackedRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
     return false;
   }
 
   request.setTimeout(15000);
-  request.addHeader(API_KEY_HEADER, API_KEY_VALUE);
-  if (strlen(TENANT_VALUE) > 0) {
-    request.addHeader(TENANT_HEADER, TENANT_VALUE);
-  }
+  addBackendAuthHeaders(request);
 
   int statusCode = request.GET();
+  String payload = "";
+  if (statusCode == HTTP_CODE_UNAUTHORIZED && strlen(AUTH_BEARER_TOKEN) == 0) {
+    request.end();
+    runtimeBearerToken = "";
+    if (refreshBearerTokenFromMiddleware()) {
+      HTTPClient retryRequest;
+      retryRequest.setReuse(false);
+      bool retryBeginOk = false;
+      WiFiClientSecure retrySecureClient;
+      if (url.startsWith("https://")) {
+        configureSecureClient(retrySecureClient);
+        retryBeginOk = retryRequest.begin(retrySecureClient, url);
+      } else {
+        retryBeginOk = retryRequest.begin(url);
+      }
+      if (retryBeginOk) {
+        retryRequest.setTimeout(15000);
+        addBackendAuthHeaders(retryRequest);
+        statusCode = retryRequest.GET();
+        if (statusCode == HTTP_CODE_OK) {
+          String payload = retryRequest.getString();
+          retryRequest.end();
+
+          DynamicJsonDocument doc(16384);
+          DeserializationError error = deserializeJson(doc, payload);
+          if (error) {
+            Serial.print("Erro ao parsear JSON de MACs: ");
+            Serial.println(error.c_str());
+            trackedRefreshInterval = TRACKED_OBJECTS_RETRY_ERROR_MS;
+            return false;
+          }
+
+          std::vector<String> newTrackedMacs;
+          int totalItems = 0;
+          int skippedBoardMismatch = 0;
+          int skippedEmptyMac = 0;
+          int skippedInvalidMac = 0;
+          int skippedDuplicate = 0;
+
+          JsonArray objectsArray;
+          if (doc.is<JsonArray>()) {
+            objectsArray = doc.as<JsonArray>();
+          } else if (doc.is<JsonObject>() && doc["data"].is<JsonArray>()) {
+            objectsArray = doc["data"].as<JsonArray>();
+          }
+
+          if (!objectsArray.isNull()) {
+            for (JsonVariant item : objectsArray) {
+              totalItems++;
+              String mac = "";
+              bool boardMatches = true;
+              String boardEspId = "";
+
+              if (item.is<JsonObject>()) {
+                JsonObject object = item.as<JsonObject>();
+
+                if (object["boardEspId"].is<const char*>()) {
+                  boardEspId = object["boardEspId"].as<const char*>();
+                  if (boardEspId.length() > 0 && boardEspId != DEVICE_ID) {
+                    boardMatches = false;
+                  }
+                }
+
+                if (object["id"].is<const char*>()) {
+                  mac = object["id"].as<const char*>();
+                } else if (object["mac"].is<const char*>()) {
+                  mac = object["mac"].as<const char*>();
+                } else if (object["macAddress"].is<const char*>()) {
+                  mac = object["macAddress"].as<const char*>();
+                }
+              } else if (item.is<const char*>()) {
+                mac = item.as<const char*>();
+              }
+
+              if (!boardMatches) {
+                skippedBoardMismatch++;
+                continue;
+              }
+
+              if (mac.length() == 0) {
+                skippedEmptyMac++;
+                continue;
+              }
+
+              String normalized = normalizeMacAddress(mac);
+              if (normalized.length() != 12) {
+                skippedInvalidMac++;
+                continue;
+              }
+
+              bool alreadyAdded = false;
+              for (const String& tracked : newTrackedMacs) {
+                if (tracked == normalized) {
+                  alreadyAdded = true;
+                  break;
+                }
+              }
+
+              if (!alreadyAdded) {
+                newTrackedMacs.push_back(normalized);
+              } else {
+                skippedDuplicate++;
+              }
+            }
+          }
+
+          Serial.print("Resumo sync MACs: total=");
+          Serial.print(totalItems);
+          Serial.print(" aceitos=");
+          Serial.print(static_cast<int>(newTrackedMacs.size()));
+          Serial.print(" boardMismatch=");
+          Serial.print(skippedBoardMismatch);
+          Serial.print(" semMac=");
+          Serial.print(skippedEmptyMac);
+          Serial.print(" formatoInvalido=");
+          Serial.print(skippedInvalidMac);
+          Serial.print(" duplicados=");
+          Serial.println(skippedDuplicate);
+
+          if (!newTrackedMacs.empty()) {
+            trackedMacs = newTrackedMacs;
+            trackedRefreshInterval = TRACKED_OBJECTS_REFRESH_MS;
+            Serial.print("MACs rastreados atualizados: ");
+            Serial.println(static_cast<int>(trackedMacs.size()));
+            for (const String& tracked : trackedMacs) {
+              Serial.print(" - MAC permitido: ");
+              Serial.println(tracked);
+            }
+            return true;
+          }
+
+          Serial.println("Lista de MACs rastreados vazia. Mantendo filtro atual.");
+          trackedRefreshInterval = TRACKED_OBJECTS_REFRESH_MS;
+          return false;
+        }
+        retryRequest.end();
+      }
+    }
+  }
+
+  if (statusCode < 0 && url.startsWith("https://")) {
+    request.end();
+    String fallbackUrl = buildHttpFallbackUrl(url);
+    HTTPClient fallbackRequest;
+    fallbackRequest.setReuse(false);
+    if (fallbackUrl.length() > 0 && fallbackRequest.begin(fallbackUrl)) {
+      fallbackRequest.setTimeout(15000);
+      addBackendAuthHeaders(fallbackRequest);
+      statusCode = fallbackRequest.GET();
+      Serial.print("Fallback objetos URL: ");
+      Serial.println(fallbackUrl);
+      if (statusCode == HTTP_CODE_OK) {
+        payload = fallbackRequest.getString();
+      }
+      fallbackRequest.end();
+    }
+  }
+
   if (statusCode != HTTP_CODE_OK) {
     Serial.print("Falha ao buscar MACs rastreados. HTTP ");
     Serial.println(statusCode);
@@ -298,7 +863,9 @@ bool Distributor::refreshTrackedMacs(bool forceRefresh) {
     return false;
   }
 
-  String payload = request.getString();
+  if (payload.length() == 0) {
+    payload = request.getString();
+  }
   request.end();
 
   DynamicJsonDocument doc(16384);

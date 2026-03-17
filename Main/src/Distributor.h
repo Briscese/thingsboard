@@ -29,14 +29,24 @@ private:
     double boardLat;
     double boardLng;
     double boardAzimuth;
+    std::vector<String> smoothedRssiMacs;
+    std::vector<float> smoothedRssiValues;
+    std::vector<String> trackedBatteryMacs;
+    std::vector<int> trackedBatteryValues;
+    String runtimeBearerToken;
+    bool connectivityDiagnosticsDone;
 
     void loggedIn(int pos);
     bool refreshTrackedMacs(bool forceRefresh);
     bool refreshBoardLocation(bool forceRefresh);
+    bool refreshBearerTokenFromMiddleware();
+    void addBackendAuthHeaders(HTTPClient& request);
+    void runConnectivityDiagnostics();
     String buildTrackedObjectsUrl() const;
     String buildBoardLocationUrl() const;
     void publishTrackedMacRssiTelemetry(const String& normalizedMac, int rssi);
-    int getTrackedBatteryLevel(const String& normalizedMac) const;
+    int applyTrackedRssiSmoothing(const String& normalizedMac, int rawRssi);
+    int getTrackedBatteryLevel(const String& normalizedMac);
 
 public:
     Distributor(std::vector<User>& users, BLEScan* pBLEScan, String api_url);
@@ -53,6 +63,7 @@ public:
     bool isTrackedMac(const String& macAddress) const;
     bool hasTrackedMacs() const { return !trackedMacs.empty(); }
     void syncTrackedMacs(bool forceRefresh = false);
+    void updateTrackedBatteryLevel(const String& macAddress, int batteryLevel);
     
     // Funções de Geolocalização
     void calculateBeaconLocation(double distance, int rssi, double& latitude, double& longitude);

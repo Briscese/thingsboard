@@ -218,6 +218,10 @@ void Advertisements::processTelemetry(uint8_t *data, size_t len)
 
     batteryLevel = batteryPercent;
     timeActivity = (uptime / 10.0) / 86400;
+
+    if (distributor != nullptr) {
+        distributor->updateTrackedBatteryLevel(String(macAddress.c_str()), batteryLevel);
+    }
     
     // Telemetria MQTT secundaria desabilitada.
     // O envio MQTT foi centralizado em Distributor::publishTrackedMacRssiTelemetry.
