@@ -11,7 +11,7 @@
 
 extern Connect* connect;
 
-const int SCAN_INTERVAL = 3000;
+const int SCAN_INTERVAL = 5000;
 const int TIME_MEDIA = 30000;  // 30 segundos - garante tempo para acumular 3+ leituras (scans a cada 3s)
 
 static String buildHttpFallbackUrl(const String& url);
@@ -53,6 +53,10 @@ void Distributor::runConnectivityDiagnostics() {
     return;
   }
   connectivityDiagnosticsDone = true;
+
+  if (!String(API_URL).startsWith("https://") && !String(MIDDLEWARE_LOGIN_URL).startsWith("https://")) {
+    return;
+  }
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Diag conexao: WiFi nao conectado, pulando testes HTTPS");
@@ -385,7 +389,7 @@ void Distributor::publishTrackedMacRssiTelemetry(const String& normalizedMac, in
     trackedRssiToSend = applyTrackedRssiSmoothing(normalizedMac, rssi);
   }
 
-  DynamicJsonDocument doc(320);
+  StaticJsonDocument<768> doc;
   doc["messageType"] = "tracked_rssi";
   doc["deviceId"] = DEVICE_ID;
   doc["espDeviceId"] = DEVICE_ID;
@@ -408,7 +412,13 @@ void Distributor::publishTrackedMacRssiTelemetry(const String& normalizedMac, in
 
   String jsonData;
   serializeJson(doc, jsonData);
+  if (doc.overflowed()) {
+    Serial.println("Falha ao montar telemetria RSSI: JSON sem capacidade");
+    return;
+  }
   connect->publishTelemetry(jsonData);
+  connect->loopMQTT();
+  delay(25);
 }
 
 String Distributor::buildTrackedObjectsUrl() const {
@@ -742,7 +752,7 @@ bool Distributor::refreshTrackedMacs(bool forceRefresh) {
 
                 if (object["boardEspId"].is<const char*>()) {
                   boardEspId = object["boardEspId"].as<const char*>();
-                  if (boardEspId.length() > 0 && boardEspId != DEVICE_ID) {
+                  if (boardEspId.length() > 0 && !boardEspId.equalsIgnoreCase(DEVICE_ID)) {
                     boardMatches = false;
                   }
                 }
@@ -903,7 +913,7 @@ bool Distributor::refreshTrackedMacs(bool forceRefresh) {
 
         if (object["boardEspId"].is<const char*>()) {
           boardEspId = object["boardEspId"].as<const char*>();
-          if (boardEspId.length() > 0 && boardEspId != DEVICE_ID) {
+          if (boardEspId.length() > 0 && !boardEspId.equalsIgnoreCase(DEVICE_ID)) {
             boardMatches = false;
           }
         }
@@ -1302,11 +1312,16 @@ void Distributor::process()
     else if (millis() - lastScanTime > SCAN_INTERVAL && BLEDevice::getInitialized() == true && !sending) 
     { 
         if (advertisements != nullptr && BLEDevice::getInitialized() == true) {
-          BLEScanResults* foundDevices = pBLEScan->start(3, false);
+          Serial.print("Heap livre antes do scan BLE: ");
+          Serial.println(ESP.getFreeHeap());
+          BLEScanResults* foundDevices = pBLEScan->start(1, false);
+          Serial.print("Heap livre depois do scan BLE: ");
+          Serial.println(ESP.getFreeHeap());
           if (foundDevices != nullptr) {
+            std::vector<int> trackedRssi;
             if (!trackedMacs.empty()) {
               const int rssiNotFound = 127;
-              std::vector<int> trackedRssi(trackedMacs.size(), rssiNotFound);
+              trackedRssi.assign(trackedMacs.size(), rssiNotFound);
               int totalFound = foundDevices->getCount();
 
               for (int i = 0; i < totalFound; i++) {
@@ -1321,7 +1336,17 @@ void Distributor::process()
                   }
                 }
               }
+            }
 
+            Serial.println("🟡 Processando dispositivos com ListDevices()...");
+            advertisements->ListDevices(*foundDevices);
+            Serial.println("✅ ListDevices() completou com sucesso!");
+            pBLEScan->clearResults();
+            Serial.print("Heap livre apos liberar scan BLE: ");
+            Serial.println(ESP.getFreeHeap());
+
+            if (!trackedMacs.empty() && trackedRssi.size() == trackedMacs.size()) {
+              const int rssiNotFound = 127;
               Serial.println("RSSI dos MACs rastreados:");
               for (size_t trackedIndex = 0; trackedIndex < trackedMacs.size(); trackedIndex++) {
                 Serial.print(" - ");
@@ -1338,12 +1363,9 @@ void Distributor::process()
                 }
               }
             }
-
-            Serial.println("🟡 Processando dispositivos com ListDevices()...");
-            advertisements->ListDevices(*foundDevices);
-            Serial.println("✅ ListDevices() completou com sucesso!");
+          } else {
+            pBLEScan->clearResults();
           }
-          pBLEScan->clearResults();
         }
         lastScanTime = millis();
     }

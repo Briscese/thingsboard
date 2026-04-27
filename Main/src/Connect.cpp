@@ -31,7 +31,7 @@ Connect::Connect(const char* name, const char* password,
 {
     updatePreferences();
     mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
-    mqttClient.setBufferSize(1024);
+    mqttClient.setBufferSize(512);
 }
 
 void Connect::activeSoftAP() {
@@ -305,29 +305,28 @@ void Connect::loadErrorMode() {
 }
 
 void Connect::getOn(String s) {
-    if (millis() - lastSendTime > 60000) {
+    const unsigned long HEARTBEAT_INTERVAL_MS = 10000;
+    if (lastSendTime != 0 && millis() - lastSendTime < HEARTBEAT_INTERVAL_MS) {
+        return;
+    }
+
+    if (validateStatusWIFI()) {
         Serial.println();
-        Serial.print("Sent TURNON: ");
+        Serial.print("Sent HEARTBEAT: ");
         Serial.println(s);
-        
-        lastSendTime = millis();
 
-        if (validateStatusWIFI()) {
-            // MQTT-only: publish TurnOn event to ThingsBoard
-            StaticJsonDocument<256> doc;
-            int wifiRssi = WiFi.RSSI() * -1;
-            doc["messageType"] = "turnon";
-            doc["deviceId"] = s;
-            doc["mac"] = WiFi.macAddress();
-            doc["wifiRSSI"] = wifiRssi;
-            doc["version"] = "12.0.0.0v-point-service-0000030042025.bin";
-            doc["ts"] = getEpochMillis();
-            String jsonData;
-            serializeJson(doc, jsonData);
-            publishTelemetry(jsonData);
+        StaticJsonDocument<256> doc;
+        doc["messageType"] = "heartbeat";
+        doc["deviceId"] = s;
+        doc["status"] = "online";
+        doc["wifiRssi"] = WiFi.RSSI();
+        doc["uptime"] = millis();
+        doc["ts"] = getEpochMillis();
 
-            // HTTP disabled: this board should only use MQTT
-            return;
+        String jsonData;
+        serializeJson(doc, jsonData);
+        if (publishTelemetry(jsonData)) {
+            lastSendTime = millis();
         }
     }
 }
@@ -433,6 +432,12 @@ bool Connect::publishTelemetryRaw(const char* data, size_t length) {
         Serial.println("Telemetria enviada com sucesso!");
     } else {
         Serial.println("Falha ao enviar telemetria");
+        Serial.print("MQTT state=");
+        Serial.print(mqttClient.state());
+        Serial.print(" payloadLen=");
+        Serial.print(length);
+        Serial.print(" freeHeap=");
+        Serial.println(ESP.getFreeHeap());
     }
     return result;
 }

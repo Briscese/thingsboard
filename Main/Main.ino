@@ -30,15 +30,9 @@ void initializeBleAndDistributorIfNeeded() {
     BLEDevice::init("");
 
     pBLEScan = BLEDevice::getScan();
-    pBLEScan->setActiveScan(true);
-    pBLEScan->setInterval(2000);
-    pBLEScan->setWindow(1999);
-
-    BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
-    pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06);
-    pAdvertising->setMinPreferred(0x12);
-    BLEDevice::startAdvertising();
+    pBLEScan->setActiveScan(false);
+    pBLEScan->setInterval(320);
+    pBLEScan->setWindow(160);
 
     distributor = new Distributor(User::getAllUsers(), pBLEScan, API_URL);
 }
@@ -66,6 +60,7 @@ void setup() {
 
         // Conectar ao MQTT ThingsBoard
         connect->connectMQTT();
+                connect->getOn(DEVICE_ID);
 
         initializeBleAndDistributorIfNeeded();
   }
@@ -79,6 +74,7 @@ void loop() {
         connect->loadErrorMode();
     } else {
         if(connect->validateStatusWIFI()) {
+            connect->getOn(DEVICE_ID);
             initializeBleAndDistributorIfNeeded();
             if (distributor != nullptr) {
                 distributor->process();
